@@ -150,8 +150,9 @@ class ChatUI(App[None]):
         self.system_log = self.query_one("#system-messages", Log)
         self.message_input = self.query_one("#message-input", Input)
         
-        # Set titles
-        self.chat_log.border_title = "Room: universal-connectivity"
+        # Set titles - get topic from connection info
+        topic = self.connection_info.get('topic', 'universal-connectivity')
+        self.chat_log.border_title = f"Room: {topic}"
         self.peers_log.border_title = "Peers"
         self.system_log.border_title = "System"
         

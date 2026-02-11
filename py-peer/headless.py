@@ -668,7 +668,8 @@ class HeadlessService:
             'nickname': self.nickname,
             'multiaddr': self.full_multiaddr,
             'connected_peers': self.chat_room.get_connected_peers() if self.chat_room else set(),
-            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0
+            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0,
+            'topic': self.chat_room.chat_topic if self.chat_room else 'universal-connectivity'
         }
     
     def get_subscribed_topics(self) -> Set[str]:
