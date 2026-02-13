@@ -40,25 +40,32 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+
+from libp2p.host.autonat.autonat import AutoNATService 
+from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol 
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
+from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+
 from chatroom import ChatRoom, ChatMessage
 
 logger = logging.getLogger("headless")
 
 # Constants
 DISCOVERY_SERVICE_TAG = "universal-connectivity"
-PROTOCOL_ID_LIST = [PROTOCOL_ID, PROTOCOL_ID_V11]
+PROTOCOL_ID_LIST = [PROTOCOL_ID]
+# PROTOCOL_ID_V11 - giving a problem when using docker with py-libp2p nodes, so commenting out for now to maintain compatibility. Will investigate further.
 DEFAULT_PORT = 9095
 
 # Bootstrap nodes for peer discovery
 BOOTSTRAP_PEERS = [
-    "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa", 
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zp7ykQCj2gRNdrFeqQ1vG13rMb4sPS",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
+    # "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    # "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    # "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa", 
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zp7ykQCj2gRNdrFeqQ1vG13rMb4sPS",
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    # "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
 ]
 
 
@@ -124,7 +131,7 @@ class HeadlessService:
     Headless service that manages libp2p components and provides data to UI through queues.
     """
 
-    def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None):
+    def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None, relay_addrs: List[str] = None, relay_server_mode: bool = True, enable_autonat: bool = True, enable_dcutr: bool = True):
         self.nickname = nickname
         self.port = port if port != 0 else find_free_port()
         self.connect_addrs = connect_addrs or []
@@ -132,6 +139,18 @@ class HeadlessService:
         self.strict_signing = strict_signing  # Flag to control message signing
         self.seed = seed
         self.topic = topic  # Custom topic to use instead of default
+
+        # NAT traversal config 
+
+        self.relay_addrs : List[str] = relay_addrs or []
+        self.relay_server_mode : bool = relay_server_mode
+        self.enable_autonat : bool = enable_autonat
+        self.enable_dcutr : bool = enable_dcutr
+
+        self.autonat: AutoNATService = None          # AutoNATService instance
+        self.circuit_v2: CircuitV2Protocol = None    # CircuitV2Protocol instance
+        self.relay_discovery:RelayDiscovery = None   # RelayDiscovery instance
+        self.dcutr: DCUtRProtocol = None             # DCUtRProtocol instance
 
         # libp2p components
         self.host = None
@@ -163,8 +182,12 @@ class HeadlessService:
         self.ready_event = trio.Event()
         self.stop_event = trio.Event()
         
-        if not ui_mode:  # Only log initialization if not in UI mode
-            logger.info(f"HeadlessService initialized - nickname: {nickname}, port: {self.port}, strict_signing: {strict_signing}")
+        if not ui_mode:
+            logger.info(
+                f"HeadlessService init — nickname: {nickname}, port: {self.port}, "
+                f"strict_signing: {strict_signing}, relay_server_mode: {relay_server_mode}, "
+                f"relay_addrs: {self.relay_addrs}, autonat: {enable_autonat}, dcutr: {enable_dcutr}"
+            )
     
     async def monitor_peers(self):
         while True:
@@ -215,6 +238,51 @@ class HeadlessService:
             # bootstrap = BOOTSTRAP_PEERS
         )
 
+        # configure AutoNAT if enabled 
+        if self.enable_autonat:
+            try:
+                self.autonat = AutoNATService(self.host)
+                logger.info("AutoNAT service created successfully")
+            except Exception as e: 
+                logger.warning(f"AutoNAT service could not be created: {e}")
+
+        # Configure relay if enabled
+        if self.relay_server_mode or self.relay_addrs:
+            try:
+                self.circuit_v2 = CircuitV2Protocol(
+                    host=self.host,
+                    allow_hop=self.relay_server_mode,
+                )
+                mode_label = "HOP server" if self.relay_server_mode else "STOP client"
+                logger.info(f"CircuitV2Protocol created ({mode_label} mode)")
+                await self._send_system_message(
+                    f"circuit_v2 created, allow_hop={self.relay_server_mode}, mode={mode_label}"
+                )
+            except Exception as e:
+                logger.warning(f"CircuitV2Protocol init failed (non-fatal): {e}")
+        
+        # Setup relay discovery if relay addresses are provided
+        if self.relay_addrs:
+            try:
+                self.relay_discovery = RelayDiscovery(
+                    host=self.host,
+                    auto_reserve=True,
+                )
+                logger.info("RelayDiscovery created (auto_reserve=True, manual reservations)")
+            except Exception as e:
+                    logger.warning(f"RelayDiscovery init failed (non-fatal): {e}")
+
+        # Dcutr protocol check 
+        if self.enable_dcutr and self.relay_addrs:
+            try:
+                self.dcutr = DCUtRProtocol(host=self.host)
+                logger.info("DCUtRProtocol created (hole punching enabled)")
+            except Exception as e:
+                logger.warning(f"DCUtRProtocol init failed (non-fatal): {e}")
+        elif self.enable_dcutr and not self.relay_addrs:
+            logger.info("ℹ️  DCUtR skipped — requires --relay to be set first")
+
+
         # Register identify protocol handler
         logger.info("📋 Registering identify protocol handler (raw protobuf format for go-libp2p compatibility)")
         identify_handler = identify_handler_for(self.host, use_varint_format=True)
@@ -260,41 +328,261 @@ class HeadlessService:
                 async with background_trio_service(self.pubsub):
                     async with background_trio_service(self.gossipsub):
                         async with background_trio_service(self.dht):
-                            logger.info("✅ Pubsub, GossipSub, and DHT services started.")
-                            await self.pubsub.wait_until_ready()
-                            logger.info("✅ Pubsub ready and operational.")
-                            logger.info("✅ DHT service started with random walk enabled.")
-                            bootstrap = None
-                            if BOOTSTRAP_PEERS:
-                                bootstrap = BootstrapDiscovery(self.host.get_network(), BOOTSTRAP_PEERS)
-                                await bootstrap.start()
-                            # Setup chat room BEFORE connections so topics are subscribed
-                            # This ensures GossipSub protocol negotiation succeeds when connecting
-                            await self._setup_chat_room()
-                            # Now setup connections after we're subscribed to topics
-                            await self._setup_connections()
-                            
-                            # Setup connection event handlers for DHT
-                            
-                            # Mark service as ready
-                            self.ready = True
-                            self.ready_event.set()
-                            logger.info("✅ Headless service is ready")
-                            
-                            # Start message processing and wait for stop
-                            async with trio.open_nursery() as nursery:
-                                nursery.start_soon(self._process_messages)
-                                nursery.start_soon(self._process_outgoing_messages)
-                                nursery.start_soon(self._process_topic_subscriptions)
-                                nursery.start_soon(self._process_peer_connections)
-                                nursery.start_soon(self._wait_for_stop)
-                                nursery.start_soon(self.monitor_peers)
-                                nursery.start_soon(maintain_connections, self.host)
+                            await self._start_nat_and_run()
 
             except (MultiselectClientError, StreamFailure) as e:
                 logger.log(f"The protocol negotitaion failed: {e}")
                 pass
     
+    async def _start_nat_and_run(self):
+        """
+        Start NAT traversal services as background tasks, then run the main loop.
+        Uses background_trio_service (original approach) to avoid triggering the
+        remove_stream_handler cleanup path that nursery.start() exposes.
+        Ready flag is set before relay setup so the UI never hangs.
+        """
+        logger.info("Pubsub, GossipSub, DHT started.")
+        await self.pubsub.wait_until_ready()
+        logger.info("Pubsub ready.")
+
+        # DEBUG relay server state
+        await self._send_system_message(
+            f"relay_server_mode={self.relay_server_mode}, "
+            f"circuit_v2={self.circuit_v2 is not None}, "
+            f"allow_hop={getattr(self.circuit_v2, 'allow_hop', 'N/A')}"
+        )
+        logger.info("Pubsub ready.")
+
+        async with trio.open_nursery() as nat_nursery:
+            # Start background NAT services using background_trio_service —
+            # same as original, avoids triggering remove_stream_handler on cleanup
+            if self.circuit_v2 is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.circuit_v2, "CircuitV2Protocol"
+                )
+                await trio.sleep(1)
+                # DEBUG - correct way to check registered handlers in py-libp2p
+                try:
+                    mux = self.host.get_mux()
+                    # Try different ways to list protocols
+                    if hasattr(mux, 'handlers'):
+                        protos = list(mux.handlers.keys())
+                    elif hasattr(mux, '_handlers'):
+                        protos = list(mux._handlers.keys())
+                    elif hasattr(mux, 'get_protocols'):
+                        protos = mux.get_protocols()
+                    else:
+                        protos = [attr for attr in dir(mux)]  # last resort — dump attributes
+                    
+                    hop = "/libp2p/circuit/relay/0.2.0/hop"
+                    stop = "/libp2p/circuit/relay/0.2.0/stop"
+                    await self._send_system_message(f"Registered protocols: {protos}")
+                    await self._send_system_message(
+                        f"HOP: {hop in str(protos)}, STOP: {stop in str(protos)}"
+                    )
+                except Exception as e:
+                    await self._send_system_message(f"Mux inspection failed: {e}")
+
+            if self.relay_discovery is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.relay_discovery, "RelayDiscovery"
+                )
+                await trio.sleep(0.5)
+
+            if self.dcutr is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.dcutr, "DCUtRProtocol"
+                )
+                await trio.sleep(0.5)
+
+            # Extra delay to let services fully initialise their stream handlers
+            # before we attempt any connections or reservations
+            await trio.sleep(1)
+
+            # Bootstrap discovery
+            if BOOTSTRAP_PEERS:
+                bootstrap = BootstrapDiscovery(self.host.get_network(), BOOTSTRAP_PEERS)
+                await bootstrap.start()
+
+            # Subscribe to topics before connecting
+            await self._setup_chat_room()
+
+            # Connect to regular peers
+            await self._setup_connections()
+
+            # Mark ready BEFORE relay setup — this unblocks run_headless_in_thread's
+            # polling loop so the UI starts immediately. Relay negotiation is a
+            # background concern and must never gate the ready flag.
+            self.ready = True
+            self.ready_event.set()
+            logger.info("✅ Headless service is ready")
+            await self._send_system_message("Service ready")
+
+            # Relay setup runs after ready is set, with per-relay timeouts
+            await self._setup_relay_connections()
+
+            # Main processing loop
+            async with trio.open_nursery() as main_nursery:
+                main_nursery.start_soon(self._process_messages)
+                main_nursery.start_soon(self._process_outgoing_messages)
+                main_nursery.start_soon(self._process_topic_subscriptions)
+                main_nursery.start_soon(self._process_peer_connections)
+                main_nursery.start_soon(self._wait_for_stop)
+                main_nursery.start_soon(self.monitor_peers)
+                main_nursery.start_soon(maintain_connections, self.host)
+
+    async def _run_background_service(self, service, name: str):
+        """
+        Generic wrapper to run trio-compatible background services.
+        """
+        try:
+            logger.info(f"Starting {name} background service...")
+            async with background_trio_service(service):
+                await trio.sleep_forever()
+        except Exception as e:
+            logger.warning(f"{name} crashed: {e}")
+
+
+    async def _setup_relay_connections(self):
+        if not self.relay_addrs:
+            return
+
+        for addr_str in self.relay_addrs:
+            logger.info(f"📡 Setting up relay connection: {addr_str}")
+            try:
+                addr = multiaddr.Multiaddr(addr_str)
+                info = info_from_p2p_addr(addr)
+
+                connected = False
+                with trio.move_on_after(10) as connect_scope:
+                    await self.host.connect(info)
+                    connected = True
+                    logger.info(f"✅ TCP connection established to relay: {info.peer_id}")
+
+                if connect_scope.cancelled_caught:
+                    logger.warning(
+                        f"⚠️ Timed out connecting to relay {addr_str} after 10s — skipping"
+                    )
+                    await self._send_system_message(
+                        f"Relay connection timed out: {addr_str}"
+                    )
+                    continue
+
+                if not connected:
+                    continue
+
+                # Increased from 1s to 3s — gives the relay's CircuitV2Protocol
+                # HOP stream handler enough time to fully initialise after our
+                # TCP connection lands. Reservation denials happen when we send
+                # the HOP RESERVE message before the relay is ready to handle it.
+                await trio.sleep(3)
+
+                try:
+                    protos = self.host.get_peerstore().get_protocols(info.peer_id)
+                    await self._send_system_message(f"Relay protocols: {protos}")
+                    hop_proto = "/libp2p/circuit/relay/0.2.0/hop"
+                    if hop_proto in protos:
+                        await self._send_system_message("✅ Relay HAS hop protocol")
+                    else:
+                        await self._send_system_message("❌ Relay MISSING hop protocol — needs --relay-server")
+                except Exception as e:
+                    await self._send_system_message(f"Could not read relay protocols: {e}")
+
+                await self._send_system_message(
+                    f"Our circuit_v2: {self.circuit_v2 is not None}, "
+                    f"allow_hop: {getattr(self.circuit_v2, 'allow_hop', 'N/A')}, "
+                    f"relay_discovery: {self.relay_discovery is not None}"
+                )
+
+
+                if self.relay_discovery is not None:
+                    # Retry loop — attempt reservation up to 3 times with backoff.
+                    # Handles the race where relay is still initialising HOP handler.
+                    reserved = False
+                    for attempt in range(1, 4):
+                        with trio.move_on_after(15) as reserve_scope:
+                            reserved = await self.relay_discovery.make_reservation(
+                                info.peer_id
+                            )
+
+                        if reserve_scope.cancelled_caught:
+                            logger.warning(
+                                f"⚠️ make_reservation timed out (attempt {attempt}/3) "
+                                f"for relay {info.peer_id}"
+                            )
+                            await trio.sleep(2 * attempt)  # backoff: 2s, 4s, 6s
+                            continue
+
+                        if reserved:
+                            logger.info(
+                                f"✅ Relay reservation granted by {info.peer_id} "
+                                f"(attempt {attempt}/3)"
+                            )
+                            await self._send_system_message(
+                                f"Relay active via {str(info.peer_id)[:12]}"
+                            )
+                            break
+                        else:
+                            logger.warning(
+                                f"❌ Reservation denied by {info.peer_id} "
+                                f"(attempt {attempt}/3) — retrying in {2 * attempt}s"
+                            )
+                            await self._send_system_message(
+                                f"Relay reservation denied (attempt {attempt}/3), retrying..."
+                            )
+                            await trio.sleep(2 * attempt)  # backoff: 2s, 4s, 6s
+
+                    if not reserved:
+                        logger.warning(
+                            f"❌ All 3 reservation attempts failed for {info.peer_id} — "
+                            f"relay may not be in HOP server mode or is overloaded"
+                        )
+                        await self._send_system_message(
+                            f"Relay reservation failed after 3 attempts: "
+                            f"{str(info.peer_id)[:12]}"
+                        )
+                else:
+                    logger.info(
+                        f"ℹ️ Connected to relay {info.peer_id} but no RelayDiscovery — "
+                        f"skipping reservation"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Relay setup failed for {addr_str} (non-fatal): {e}"
+                )
+                await self._send_system_message(
+                    f"Relay setup failed: {addr_str}"
+                )
+
+
+    async def _request_relay_reservation(self, relay_peer_id: ID):
+        """
+        Request a Circuit Relay v2 reservation via RelayDiscovery.make_reservation().
+        Returns True on success (STATUS_OK from relay), False if denied.
+        Failure is non-fatal — direct connections still work without a reservation.
+        """
+        if self.relay_discovery is None:
+            logger.info(f"ℹ️  No RelayDiscovery — skipping reservation for {relay_peer_id}")
+            return
+
+        try:
+            logger.info(f"📡 Requesting relay reservation from: {relay_peer_id}")
+            # RelayDiscovery.make_reservation(peer_id: ID) -> bool
+            success = await self.relay_discovery.make_reservation(relay_peer_id)
+            if success:
+                logger.info(f"✅ Relay reservation granted by {relay_peer_id}")
+                await self._send_system_message(
+                    f"Relay reservation active via {str(relay_peer_id)[:12]}"
+                )
+            else:
+                logger.warning(f"⚠️  Relay {relay_peer_id} denied reservation")
+                await self._send_system_message(
+                    f"Relay reservation denied by {str(relay_peer_id)[:12]}"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️  Relay reservation failed (non-fatal): {e}")
+
     async def _setup_connections(self):
         """Setup connections to specified peers with detailed protocol logging."""
         if not self.connect_addrs:
@@ -662,15 +950,20 @@ class HeadlessService:
         """Get connection information for UI."""
         if not self.ready:
             return {}
-        
+
+        all_addrs = self.host.get_addrs()
+        relay_paths = [str(a) for a in all_addrs if "p2p-circuit" in str(a)]
+
         return {
             'peer_id': str(self.host.get_id()),
             'nickname': self.nickname,
-            'multiaddr': self.full_multiaddr,
+            'multiaddr': self.full_multiaddr, # Your direct address
+            'relay_addrs': relay_paths,       # YOUR NEW RELAYED ADDRESSES
             'connected_peers': self.chat_room.get_connected_peers() if self.chat_room else set(),
-            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0
+            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0,
+            'autonat_status': self.autonat.get_status() if self.autonat else 0
         }
-    
+        
     def get_subscribed_topics(self) -> Set[str]:
         """Get list of all subscribed topics."""
         if not self.chat_room:

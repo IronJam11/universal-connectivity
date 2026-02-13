@@ -92,7 +92,11 @@ async def main_async(args):
         connect_addrs=args.connect,
         strict_signing=strict_signing,
         seed=args.seed,
-        topic=args.topic
+        topic=args.topic,
+        relay_addrs=args.relay,
+        relay_server_mode=args.relay_server,
+        enable_autonat=not args.no_autonat,
+        enable_dcutr=not args.no_dcutr
     )
     
     try:
@@ -229,11 +233,22 @@ async def handle_user_input(headless_service):
             
             elif message.strip() == "/status":
                 info = headless_service.get_connection_info()
-                print(f"📊 Status:")
-                print(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
-                print(f"  - Nickname: {info.get('nickname', 'Unknown')}")
-                print(f"  - Connected peers: {info.get('peer_count', 0)}")
-                print(f"  - Subscribed topics: chat, discovery")
+                print(f"\n📊 --- Node Status ---")
+                print(f"  - Nickname: {info.get('nickname')}")
+                print(f"  - Peer ID:  {info.get('peer_id')}")
+                print(f"  - Local Addr: {info.get('multiaddr')}")
+                
+                # Show the Relay Addresses if they exist
+                relays = info.get('relay_addrs', [])
+                if relays:
+                    print(f"  -  Relayed Addresses (Use these to connect from other networks):")
+                    for r in relays:
+                        print(f"      {r}/p2p/{info.get('peer_id')}")
+                else:
+                    print(f"  -  No active relay reservations.")
+                    
+                print(f"  - Peers: {info.get('peer_count')}")
+                print(f"-----------------------\n")
                 continue
             
             if message.strip():
@@ -312,6 +327,45 @@ def main():
         type=str,
         help="Custom topic to subscribe.",
     )
+
+    # nat-traversal args
+
+    parser.add_argument(
+        "--relay",
+        action="append",
+        default=[],
+        help="Use relay address (can be used multiple times, e.g. --relay /ip4/"
+    )
+
+    parser.add_argument(
+        "--relay-server",
+        action="store_true",
+        help="Run in relay server mode (enables relay functionality for other peers)",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--no-autonat",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable AutoNAT. By default AutoNATService is created, which "
+            "asks connected peers to dial us back to determine reachability. "
+            "Source: libp2p/host/autonat/autonat.py → AutoNATService."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-dcutr",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable DCUtR hole punching. By default DCUtRProtocol is created "
+            "when --relay is set. It upgrades relayed connections to direct ones "
+            "using simultaneous-open. "
+            "Source: libp2p/relay/circuit_v2/dcutr.py → DCUtRProtocol."
+        ),
+    )
     
     args = parser.parse_args()
     
@@ -344,7 +398,11 @@ def main():
                 connect_addrs=args.connect,
                 strict_signing=strict_signing,
                 seed=args.seed,
-                topic=args.topic
+                topic=args.topic,
+                relay_addrs=args.relay,
+                relay_server_mode=args.relay_server,
+                enable_autonat=not args.no_autonat,
+                enable_dcutr=not args.no_dcutr
             )
             
             # Start headless service in background thread
@@ -384,7 +442,11 @@ def main():
                 connect_addrs=args.connect,
                 strict_signing=strict_signing,
                 seed=args.seed,
-                topic=args.topic
+                topic=args.topic,
+                relay_addrs=args.relay,
+                relay_server_mode=args.relay_server,
+                enable_autonat=not args.no_autonat,
+                enable_dcutr=not args.no_dcutr
             )
             
             # Start headless service in background thread
@@ -421,3 +483,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 

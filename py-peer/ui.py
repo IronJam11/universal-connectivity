@@ -213,7 +213,8 @@ class ChatUI(App[None]):
             self.display_system_message(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
             self.display_system_message(f"  - Nickname: {info.get('nickname', 'Unknown')}")
             self.display_system_message(f"  - Connected peers: {info.get('peer_count', 0)}")
-            self.display_system_message(f"  - Subscribed topics: chat, discovery")
+            self.display_system_message(f"  - Subscribed topics: chat, discovery"),
+            self.display_system_message(f"  - Relay reservations: {len(info.get('relay_addrs', []))}")
         
         elif cmd == "/multiaddr":
             info = self.headless_service.get_connection_info()
