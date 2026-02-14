@@ -14,8 +14,8 @@ import traceback
 import trio
 import threading
 
-from headless import HeadlessService
-from ui import ChatUI
+from core.headless import HeadlessService
+from ui.ui import ChatUI
 
 DEFAULT_SEED = "py-peer"
 
@@ -73,12 +73,12 @@ def run_headless_in_thread(headless_service, ready_event):
     if not headless_service.ready:
         raise RuntimeError("Headless service failed to start within timeout")
     
-    logger.info("✅ Headless service is ready in background thread")
+    logger.info("Headless service is ready in background thread")
     return thread
 
 
 async def main_async(args):
-    """Main async function."""
+    """Execute main asynchronous function."""
     logger.info("Starting Universal Connectivity Python Peer...")
     
     # Create nickname
@@ -113,7 +113,7 @@ async def main_async(args):
                 
                 # Wait for service to be ready
                 await headless_service.ready_event.wait()
-                logger.info("✅ Headless service is ready, starting UI...")
+                logger.info("Headless service is ready, starting UI")
                 
                 # Run simple interactive mode
                 await run_simple_interactive(headless_service)
@@ -131,13 +131,13 @@ async def run_simple_interactive(headless_service):
     """Run simple interactive mode."""
     connection_info = headless_service.get_connection_info()
     
-    print(f"\n=== Universal Connectivity Chat ===")
-    print(f"Nickname: {connection_info.get('nickname', 'Unknown')}")
-    print(f"Peer ID: {connection_info.get('peer_id', 'Unknown')}")
-    print(f"Multiaddr: {connection_info.get('multiaddr', 'Unknown')}")
-    print(f"Type messages and press Enter to send. Type 'quit' to exit.")
-    print(f"Commands: /peers, /status, /multiaddr")
-    print()
+    logger.info(f"\n=== Universal Connectivity Chat ===")
+    logger.info(f"Nickname: {connection_info.get('nickname', 'Unknown')}")
+    logger.info(f"Peer ID: {connection_info.get('peer_id', 'Unknown')}")
+    logger.info(f"Multiaddr: {connection_info.get('multiaddr', 'Unknown')}")
+    logger.info(f"Type messages and press Enter to send. Type 'quit' to exit.")
+    logger.info(f"Commands: /peers, /status, /multiaddr")
+    logger.info(f"Ready to receive messages.")
     
     # Start background task to monitor message queues
     async with trio.open_nursery() as nursery:
@@ -159,14 +159,14 @@ async def monitor_message_queues(headless_service):
         logger.warning("Message queues not available")
         return
     
-    logger.info("📡 Starting message queue monitoring...")
+    logger.info("Starting message queue monitoring...")
     
     while True:
         try:
             # Check message queue
             try:
                 message_data = message_queue.sync_q.get_nowait()
-                logger.info(f"📨 Got message from queue: {message_data}")
+                logger.info(f"Received message from queue: {message_data}")
                 
                 if message_data.get('type') == 'chat_message':
                     sender_nick = message_data['sender_nick']
@@ -175,7 +175,7 @@ async def monitor_message_queues(headless_service):
 
                     # Display incoming message
                     sender_short = sender_id[:8] if len(sender_id) > 8 else sender_id
-                    print(f"[{sender_nick}({sender_short})]: {msg}")
+                    logger.info(f"[{sender_nick}({sender_short})]: {msg}")
                     
             except:
                 pass  # Empty queue is normal, no need to log
@@ -183,10 +183,10 @@ async def monitor_message_queues(headless_service):
             # Check system queue
             try:
                 system_data = system_queue.sync_q.get_nowait()
-                logger.info(f"📡 Got system message from queue: {system_data}")
+                logger.info(f"Received system message from queue: {system_data}")
                 
                 if system_data.get('type') == 'system_message':
-                    print(f"📡 {system_data['message']}")
+                    logger.info(f"📡 {system_data['message']}")
                     
             except:
                 pass  # Empty queue is normal, no need to log
@@ -205,7 +205,7 @@ async def handle_user_input(headless_service):
             message = await trio.to_thread.run_sync(input)
             
             if message.lower() in ["quit", "exit", "q"]:
-                print("Goodbye!")
+                logger.info("Goodbye!")
                 break
             
             # Handle special commands
@@ -213,27 +213,27 @@ async def handle_user_input(headless_service):
                 info = headless_service.get_connection_info()
                 peers = info.get('connected_peers', set())
                 if peers:
-                    print(f"📡 Connected peers ({len(peers)}):")
+                    logger.info(f"📡 Connected peers ({len(peers)}):")
                     for peer in peers:
-                        print(f"  - {peer[:8]}...")
+                        logger.info(f"  - {peer[:8]}...")
                 else:
-                    print("📡 No peers connected")
+                    logger.info("📡 No peers connected")
                 continue
             
             elif message.strip() == "/multiaddr":
                 info = headless_service.get_connection_info()
-                print(f"\n📋 Copy this multiaddress:")
-                print(f"{info.get('multiaddr', 'Unknown')}")
-                print()
+                logger.info(f"\n📋 Copy this multiaddress:")
+                logger.info(f"{info.get('multiaddr', 'Unknown')}")
+                logger.info(f"")
                 continue
             
             elif message.strip() == "/status":
                 info = headless_service.get_connection_info()
-                print(f"📊 Status:")
-                print(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
-                print(f"  - Nickname: {info.get('nickname', 'Unknown')}")
-                print(f"  - Connected peers: {info.get('peer_count', 0)}")
-                print(f"  - Subscribed topics: chat, discovery")
+                logger.info(f" Status:")
+                logger.info(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
+                logger.info(f"  - Nickname: {info.get('nickname', 'Unknown')}")
+                logger.info(f"  - Connected peers: {info.get('peer_count', 0)}")
+                logger.info(f"  - Subscribed topics: chat, discovery")
                 continue
             
             if message.strip():
@@ -241,7 +241,7 @@ async def handle_user_input(headless_service):
                 headless_service.send_message(message)
                 
     except (EOFError, KeyboardInterrupt):
-        print("\nGoodbye!")
+        logger.info("\nGoodbye!")
     
     await headless_service.stop()
 

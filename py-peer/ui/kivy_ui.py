@@ -51,7 +51,7 @@ class MessageBubble(MDCard):
         self.padding = dp(10)
         self.spacing = dp(5)
         
-        # Set different colors for sent/received messages
+        # Set colors for sent vs received messages
         if is_self:
             self.md_bg_color = (0.85, 0.95, 0.85, 1)  # Light green for sent
             self.pos_hint = {'right': 0.98}
@@ -171,10 +171,10 @@ class ChatScreen(Screen):
     
     def set_topic(self, topic: str):
         """
-        Set the topic for this chat screen and load its messages.
+        Set the topic for this chat screen and load messages.
         
         Args:
-            topic: The topic name to display
+            topic: Topic name to display
         """
         self.current_topic = topic
         self.toolbar.title = f"# {topic}"
@@ -190,7 +190,7 @@ class ChatScreen(Screen):
         self.load_topic_messages()
     
     def load_topic_messages(self):
-        """Load all messages for the current topic."""
+        """Load messages for current topic."""
         if not self.current_topic:
             return
         
@@ -207,7 +207,7 @@ class ChatScreen(Screen):
             self.add_message_bubble(message, sender_nick, is_self=is_self, timestamp=timestamp)
     
     def send_message(self, *args):
-        """Send a message to the current topic."""
+        """Send message to current topic."""
         if not self.current_topic:
             return
         
@@ -238,7 +238,7 @@ class ChatScreen(Screen):
             self.show_system_message(f"Error: {e}")
     
     def handle_command(self, command: str):
-        """Handle special commands."""
+        """Process special commands."""
         cmd = command.lower().strip()
         
         if cmd in ["/quit", "/exit"]:
@@ -249,7 +249,7 @@ class ChatScreen(Screen):
             self.show_system_message(f"Unknown command: {command}")
     
     def check_queues(self, dt):
-        """Check message queues for new messages for the current topic."""
+        """Check message queues for new messages in current topic."""
         # Check message queue
         try:
             while True:
@@ -290,7 +290,7 @@ class ChatScreen(Screen):
             logger.error(f"Error checking system queue: {e}")
     
     def add_message_bubble(self, message: str, sender: str, is_self: bool = False, timestamp: str = ""):
-        """Add a message bubble to the chat."""
+        """Add message bubble to chat."""
         bubble = MessageBubble(
             message=message,
             sender=sender,
@@ -300,7 +300,7 @@ class ChatScreen(Screen):
         self.messages_layout.add_widget(bubble)
     
     def show_system_message(self, message: str):
-        """Show a system message."""
+        """Display system message."""
         timestamp = time.strftime("%H:%M")
         
         # Create a centered system message
@@ -323,7 +323,7 @@ class ChatScreen(Screen):
         self.messages_layout.add_widget(system_card)
     
     def show_peers(self, *args):
-        """Show connected peers dialog."""
+        """Display connected peers dialog."""
         info = self.headless_service.get_connection_info()
         peers = info.get('connected_peers', set())
         
@@ -346,7 +346,7 @@ class ChatScreen(Screen):
         dialog.open()
     
     def show_info(self, *args):
-        """Show connection info dialog with clickable text to copy."""
+        """Display connection info dialog with copyable text."""
         info = self.headless_service.get_connection_info()
         peer_id = info.get('peer_id', 'Unknown')
         multiaddr = info.get('multiaddr', 'Unknown')
@@ -516,7 +516,7 @@ Subscribed Topics: {topics_list}
 
 
 class PeersScreen(Screen):
-    """Screen showing list of connected peers."""
+    """Display list of connected peers."""
     
     def __init__(self, headless_service, **kwargs):
         super().__init__(**kwargs)
@@ -594,7 +594,7 @@ class PeersScreen(Screen):
 
 
 class TopicsScreen(Screen):
-    """Main screen showing list of subscribed topics - WhatsApp style selector."""
+    """Main screen showing subscribed topics with messaging interface."""
     
     def __init__(self, headless_service, **kwargs):
         super().__init__(**kwargs)
@@ -950,7 +950,7 @@ class TopicsScreen(Screen):
 
 
 class ChatApp(MDApp):
-    """Main Kivy application for the chat."""
+    """Main Kivy application for chat interface."""
     
     def __init__(self, headless_service, **kwargs):
         super().__init__(**kwargs)
@@ -990,10 +990,10 @@ class ChatApp(MDApp):
 
 def run_kivy_ui(headless_service):
     """
-    Run the Kivy UI with the given headless service.
+    Run Kivy UI with headless service.
     
     Args:
-        headless_service: The HeadlessService instance to use for communication
+        headless_service: HeadlessService instance for communication
     """
     logger.info("Starting Kivy UI...")
     

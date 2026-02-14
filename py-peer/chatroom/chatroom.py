@@ -50,9 +50,8 @@ class ChatMessage:
 
 class ChatRoom:
     """
-    Represents a subscription to PubSub topics for chat functionality.
-    Messages can be published to topics and received messages are handled
-    through callback functions.
+    Manages PubSub topic subscriptions for chat functionality.
+    Handles message publishing and receiving via callbacks.
     """
     
     def __init__(self, host: BasicHost, pubsub: Pubsub, nickname: str, multiaddr: str = None, headless_service=None, topic: str = None):
@@ -128,26 +127,26 @@ class ChatRoom:
             raise
     
     async def publish_message(self, message: str):
-        """Publish a chat message in plain text format (Go-compatible)."""
+        """Publish chat message in plain text format for Go compatibility."""
         try:
             # Check if we have any peers connected
             peer_count = len(self.pubsub.peers)
-            logger.info(f"📤 Publishing message to {peer_count} peers: {message}")
+            logger.info(f"Publishing message to {peer_count} peers: {message}")
             logger.info(f"Total pubsub peers: {list(self.pubsub.peers.keys())}")
             
-            # Send plain text message (Go-compatible format) to the custom topic
-            print(f"Sending message {message}")
+            # Send plain text message to the custom topic
+            logger.debug(f"Sending message: {message}")
             await self.pubsub.publish(self.chat_topic, message.encode())
-            logger.info(f"✅ Message published successfully to topic '{self.chat_topic}'")
+            logger.info(f"Message published successfully to topic '{self.chat_topic}'")
             
             if peer_count == 0:
-                print(f"⚠️  No peers connected - message sent to topic but no one will receive it")
+                logger.warning("No peers connected - message sent to topic but no recipients")
             else:
-                print(f"✓ Message sent to {peer_count} peer(s)")
+                logger.info(f"✓ Message sent to {peer_count} peer(s)")
                 
         except Exception as e:
-            logger.error(f"❌ Failed to publish message: {e}")
-            print(f"❌ Error sending message: {e}")
+            logger.error(f"Failed to publish message: {e}")
+            logger.error(f"Error sending message: {e}")
             self._log_system_message(f"ERROR: Failed to publish message: {e}")
     
     async def publish_to_topic(self, topic: str, message: str):
@@ -159,28 +158,27 @@ class ChatRoom:
                 return False
             
             peer_count = len(self.pubsub.peers)
-            logger.info(f"📤 Publishing message to topic '{topic}' with {peer_count} peers: {message}")
+            logger.info(f"Publishing message to topic '{topic}' with {peer_count} peers: {message}")
             
             # Send plain text message
             await self.pubsub.publish(topic, message.encode())
-            logger.info(f"✅ Message published successfully to topic '{topic}'")
+            logger.info(f"Message published successfully to topic '{topic}'")
             
             return True
                 
         except Exception as e:
-            logger.error(f"❌ Failed to publish message to topic '{topic}': {e}")
+            logger.error(f"Failed to publish message to topic '{topic}': {e}")
             self._log_system_message(f"ERROR: Failed to publish message to topic '{topic}': {e}")
             return False
     
     async def _validate_message_with_identify(self, message, sender_id):
-        """Validate message using identify protocol to get sender's public key.
+        """Validate message via identify protocol to retrieve sender's public key.
         
-        This should only be called for messages from OTHER peers that don't include
-        a public key in the message data.
+        Called only for messages from other peers lacking embedded public key.
         """
         # Safety check: never try to identify ourselves
         if sender_id == self.peer_id:
-            logger.debug(f"⏭️  Skipping identify for own peer ID {sender_id}")
+            logger.debug(f"Skipping identify for own peer ID {sender_id}")
             return True
             
         if not self.headless_service:
@@ -192,7 +190,7 @@ class ChatRoom:
             peer_info = await self.headless_service.get_cached_peer_info(sender_id)
             
             if peer_info and peer_info.get('public_key'):
-                logger.info(f"✅ Retrieved public key for {sender_id} via identify protocol")
+                logger.info(f"Retrieved public key for {sender_id} via identify protocol")
                 # Here you could add actual message signature validation
                 # For now, we just log that we got the public key
                 return True
@@ -201,12 +199,12 @@ class ChatRoom:
                 return True  # Still accept message but log the issue
                 
         except Exception as e:
-            logger.error(f"❌ Error validating message with identify: {e}")
+            logger.error(f"Error validating message with identify: {e}")
             return True  # Default to accepting message on error
     
     async def _handle_topic_messages(self, topic_name: str, subscription):
-        """Handle incoming messages for any subscribed topic (including chat and discovery)."""
-        logger.debug(f"📨 Starting message handler for topic: {topic_name}")
+        """Handle incoming messages for subscribed topics."""
+        logger.debug(f"Starting message handler for topic: {topic_name}")
         
         try:
             async for message in self._message_stream(subscription):
@@ -221,15 +219,15 @@ class ChatRoom:
                     # Only validate messages from other peers
                     if not is_own_message:
                         if not message.key:
-                            logger.debug(f"🔍 Message from {sender_id} has no public key, using identify protocol")
+                            logger.debug(f"Message from {sender_id} has no public key, using identify protocol")
                             is_valid = await self._validate_message_with_identify(message, sender_id)
                             if not is_valid:
-                                logger.warning(f"⚠️  Message validation failed for {sender_id}, skipping")
+                                logger.warning(f"Message validation failed for {sender_id}, skipping")
                                 continue
                         else:
-                            logger.debug(f"✅ Message from {sender_id} includes public key")
+                            logger.debug(f"Message from {sender_id} includes public key")
                     else:
-                        logger.debug(f"📝 Processing own message from {sender_id} (no validation needed)")
+                        logger.debug(f"Processing own message from {sender_id} (no validation needed)")
                     
                     # Format sender nickname
                     if is_own_message:
@@ -239,7 +237,7 @@ class ChatRoom:
                     
                     actual_message = raw_data
                     
-                    logger.info(f"📨 Received message on topic '{topic_name}' from {sender_id} ({sender_nick}): {actual_message}")
+                    logger.info(f"Received message on topic '{topic_name}' from {sender_id} ({sender_nick}): {actual_message}")
                     
                     # Create ChatMessage object for handlers
                     chat_msg = ChatMessage(
@@ -254,17 +252,17 @@ class ChatRoom:
                         try:
                             await handler(chat_msg)
                         except Exception as e:
-                            logger.error(f"❌ Error in message handler: {e}")
+                            logger.error(f"Error in message handler: {e}")
                     
                     # Default console output if no handlers
                     if not self.message_handlers:
-                        print(f"[{topic_name}][{chat_msg.sender_nick}]: {chat_msg.message}")
+                        logger.info(f"[{topic_name}][{chat_msg.sender_nick}]: {chat_msg.message}")
                 
                 except Exception as e:
-                    logger.error(f"❌ Error processing message on topic '{topic_name}': {e}")
+                    logger.error(f"Error processing message on topic '{topic_name}': {e}")
         
         except Exception as e:
-            logger.error(f"❌ Error in message handler for topic '{topic_name}': {e}")
+            logger.error(f"Error in message handler for topic '{topic_name}': {e}")
     
     async def _message_stream(self, subscription) -> AsyncIterator[Message]:
         """Create an async iterator for subscription messages."""
@@ -317,12 +315,12 @@ class ChatRoom:
     
     async def run_interactive(self):
         """Run interactive chat mode."""
-        print(f"\n=== Universal Connectivity Chat ===")
-        print(f"Nickname: {self.nickname}")
-        print(f"Peer ID: {self.peer_id}")
-        print(f"Type messages and press Enter to send. Type 'quit' to exit.")
-        print(f"Commands: /peers, /status, /multiaddr")
-        print()
+        logger.info(f"\n=== Universal Connectivity Chat ===")
+        logger.info(f"Nickname: {self.nickname}")
+        logger.info(f"Peer ID: {self.peer_id}")
+        logger.info(f"Type messages and press Enter to send. Type 'quit' to exit.")
+        logger.info(f"Commands: /peers, /status, /multiaddr")
+        logger.info()
         
         async with trio.open_nursery() as nursery:
             # Start message handlers
@@ -340,7 +338,7 @@ class ChatRoom:
                     message = await trio.to_thread.run_sync(input)
                     
                     if message.lower() in ["quit", "exit", "q"]:
-                        print("Goodbye!")
+                        logger.info("Goodbye!")
                         self.running = False
                         break
                     
@@ -348,35 +346,35 @@ class ChatRoom:
                     elif message.strip() == "/peers":
                         peers = self.get_connected_peers()
                         if peers:
-                            print(f"📡 Connected peers ({len(peers)}):")
+                            logger.info(f"Connected peers ({len(peers)}):")
                             for peer in peers:
-                                print(f"  - {peer[:8]}...")
+                                logger.info(f"  - {peer[:8]}...")
                         else:
-                            print("📡 No peers connected")
+                            logger.info("No peers connected")
                         continue
                     
                     elif message.strip() == "/multiaddr":
-                        print(f"\n📋 Copy this multiaddress:")
-                        print(f"{self.multiaddr}")
-                        print()
+                        logger.info(f"\n Copy this multiaddress:")
+                        logger.info(f"{self.multiaddr}")
+                        logger.info()
                         continue
                     
                     elif message.strip() == "/status":
                         peer_count = self.get_peer_count()
                         subscribed_topics = ", ".join(sorted(self.get_subscribed_topics()))
-                        print(f"📊 Status:")
-                        print(f"  - Multiaddr: {self.multiaddr}")
-                        print(f"  - Nickname: {self.nickname}")
-                        print(f"  - Connected peers: {peer_count}")
-                        print(f"  - Chat topic: {self.chat_topic}")
-                        print(f"  - Subscribed topics: {subscribed_topics}")
+                        logger.info(f"Status:")
+                        logger.info(f"  - Multiaddr: {self.multiaddr}")
+                        logger.info(f"  - Nickname: {self.nickname}")
+                        logger.info(f"  - Connected peers: {peer_count}")
+                        logger.info(f"  - Chat topic: {self.chat_topic}")
+                        logger.info(f"  - Subscribed topics: {subscribed_topics}")
                         continue
                     
                     if message.strip():
                         await self.publish_message(message)
                 
                 except EOFError:
-                    print("\nGoodbye!")
+                    logger.info("\nGoodbye!")
                     self.running = False
                     break
                 except Exception as e:
@@ -409,10 +407,10 @@ class ChatRoom:
         Subscribe to a new topic dynamically.
         
         Args:
-            topic_name: The name of the topic to subscribe to
+            topic_name: Topic name to subscribe to
             
         Returns:
-            True if subscription was successful, False otherwise
+            True if successful, False otherwise
         """
         try:
             if topic_name in self.subscriptions:

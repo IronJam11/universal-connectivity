@@ -21,13 +21,13 @@ logger = logging.getLogger("ui")
 
 class ChatUI(App[None]):
     """
-    A Textual-based Text User Interface (TUI) that works with the headless service.
+    Textual-based TUI that interfaces with the headless service.
     
-    The UI provides:
-    - A main chat message area (left side)
-    - A peers list panel (right side)  
-    - A system messages area (bottom)
-    - An input field for typing messages
+    Features:
+    - Main chat message area (left)
+    - Peers list panel (right)
+    - System messages area (bottom)
+    - Input field for messages
     """
     
     CSS = """

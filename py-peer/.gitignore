@@ -1,0 +1,160 @@
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+__pycache__/
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+*.egg
+*.egg-info
+dist
+build
+.build
+eggs
+.eggs
+parts
+bin
+var
+sdist
+develop-eggs
+.installed.cfg
+lib
+lib64
+pip-wheel-metadata
+venv*
+.venv*
+.Python
+downloads/
+wheels/
+MANIFEST
+pip-wheel-metadata
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.coverage
+.tox
+nosetests.xml
+htmlcov/
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+
+# Test result files
+tests/**/results/*.json
+tests/**/results/*.xml
+tests/**/results/*.html
+
+# Translations
+*.mo
+*.pot
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# Complexity
+output/*.html
+output/*/index.html
+
+# Sphinx documentation
+docs/_build
+docs/modules.rst
+docs/*.internal.rst
+
+# Hypothesis Property testing
+.hypothesis
+
+# tox/pytest cache
+.cache
+.pytest_cache
+
+# Test output logs
+logs/
+*.log
+
+# VIM temp files
+*.sw[op]
+
+# Emacs temp files
+*~
+\#*\#
+.\#*
+
+# mypy
+.mypy_cache
+.dmypy.json
+dmypy.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# pyenv
+.python-version
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# UV lock file (Python package manager)
+uv.lock
+
+# Application-specific
+system_messages.txt
+*.txt.bak
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Local configuration
+.env
+.env.local
+*.local
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyright
+.pyright/

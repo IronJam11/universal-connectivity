@@ -40,7 +40,7 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
-from chatroom import ChatRoom, ChatMessage
+from chatroom.chatroom import ChatRoom, ChatMessage
 
 logger = logging.getLogger("headless")
 
@@ -80,7 +80,7 @@ def filter_compatible_peer_info(peer_info) -> bool:
     return False
 
 async def maintain_connections(host) -> None:
-    """Maintain connections to ensure the host remains connected to healthy peers."""
+    """Maintain persistent connections to healthy peers."""
     while True:
         try:
             connected_peers = host.get_connected_peers()
@@ -121,7 +121,7 @@ async def maintain_connections(host) -> None:
 
 class HeadlessService:
     """
-    Headless service that manages libp2p components and provides data to UI through queues.
+    Headless service managing libp2p components and UI communication via queues.
     """
 
     def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None):
@@ -168,7 +168,7 @@ class HeadlessService:
     
     async def monitor_peers(self):
         while True:
-            print("testing print")
+            logger.info("Testing monitor_peers function")
             logger.info("testing status")
             logger.info(f"Connected peers are: len{self.host.get_connected_peers()}")
             logger.info(f"peers in peer store are: len{self.host.get_peerstore().peers_with_addrs()}")
@@ -177,8 +177,8 @@ class HeadlessService:
             await trio.sleep(5)
 
     async def start(self):
-        """Start the headless service."""
-        logger.info("Starting headless service...")
+        """Initialize and start headless service."""
+        logger.info("Starting headless service")
         
         try:
             # Create queues for communication with UI
@@ -202,7 +202,7 @@ class HeadlessService:
             raise
     
     async def _run_service(self):
-        """Run the main service loop."""
+        """Execute main service loop."""
         key_pair = create_new_key_pair()
         
         # Create listen address
@@ -215,23 +215,23 @@ class HeadlessService:
             # bootstrap = BOOTSTRAP_PEERS
         )
 
-        # Register identify protocol handler
-        logger.info("📋 Registering identify protocol handler (raw protobuf format for go-libp2p compatibility)")
+        # Register identify protocol handler for go-libp2p compatibility
+        logger.info("Registering identify protocol handler (raw protobuf format)")
         identify_handler = identify_handler_for(self.host, use_varint_format=True)
         self.host.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
-        logger.info(f"✅ Identify protocol handler registered for {IDENTIFY_PROTOCOL_ID} (raw format)")
+        logger.info(f"Identify protocol handler registered for {IDENTIFY_PROTOCOL_ID}")
 
         # Create DHT with random walk enabled
         self.dht = KadDHT(self.host, DHTMode.SERVER, enable_random_walk=True)
-        logger.info("✅ DHT created with random walk enabled")
+        logger.info("DHT created with random walk enabled")
         
         self.full_multiaddr = f"{listen_addr}/p2p/{self.host.get_id()}"
         logger.info(f"Host created with PeerID: {self.host.get_id()}")
         logger.info(f"Listening on: {listen_addr}")
         logger.info(f"Full multiaddr: {self.full_multiaddr}")
         
-        # Log GossipSub protocol configuration
-        logger.info(f"📋 Configuring GossipSub with protocols: {PROTOCOL_ID_LIST}")
+        # Configure GossipSub protocol
+        logger.info(f"Configuring GossipSub with protocols: {PROTOCOL_ID_LIST}")
         logger.info(f"  Protocol 1: {PROTOCOL_ID}")
         logger.info(f"  Protocol 2: {PROTOCOL_ID_V11}")
         
@@ -246,12 +246,12 @@ class HeadlessService:
             heartbeat_initial_delay=2.0,  # Start heartbeats sooner
             heartbeat_interval=5,  # More frequent heartbeats for testing
         )
-        logger.info("✅ GossipSub router created successfully")
+        logger.info("GossipSub router created successfully")
         
         # Create PubSub
-        logger.info(f"🔐 Creating PubSub with strict_signing={self.strict_signing}")
+        logger.info(f"Creating PubSub with strict_signing={self.strict_signing}")
         self.pubsub = Pubsub(self.host, self.gossipsub, strict_signing=self.strict_signing)
-        logger.info("✅ PubSub service created successfully")
+        logger.info("PubSub service created successfully")
         
         # Start host and pubsub services
         async with self.host.run(listen_addrs=[listen_addr]):
@@ -260,10 +260,10 @@ class HeadlessService:
                 async with background_trio_service(self.pubsub):
                     async with background_trio_service(self.gossipsub):
                         async with background_trio_service(self.dht):
-                            logger.info("✅ Pubsub, GossipSub, and DHT services started.")
+                            logger.info("Pubsub, GossipSub, and DHT services started.")
                             await self.pubsub.wait_until_ready()
-                            logger.info("✅ Pubsub ready and operational.")
-                            logger.info("✅ DHT service started with random walk enabled.")
+                            logger.info("Pubsub ready and operational.")
+                            logger.info("DHT service started with random walk enabled.")
                             bootstrap = None
                             if BOOTSTRAP_PEERS:
                                 bootstrap = BootstrapDiscovery(self.host.get_network(), BOOTSTRAP_PEERS)
@@ -310,13 +310,13 @@ class HeadlessService:
                 # Check if already connected
                 existing_conns = self.host.get_network().connections.get(info.peer_id)
                 if existing_conns:
-                    logger.info(f"✅ Already connected to peer: {info.peer_id}, skipping connection attempt")
+                    logger.info(f"Already connected to peer: {info.peer_id}, skipping connection attempt")
                     continue
                 
                 # Log connection attempt
                 logger.info(f"🔗 Initiating connection to peer: {info.peer_id}")
                 await self.host.connect(info)
-                logger.info(f"✅ TCP connection established to peer: {info.peer_id}")
+                logger.info(f"TCP connection established to peer: {info.peer_id}")
                 
                 # Wait longer for protocol negotiation
                 await trio.sleep(3)
@@ -331,11 +331,11 @@ class HeadlessService:
                     swarm = self.host.get_network()
                     if hasattr(swarm, 'connections') and info.peer_id in swarm.connections:
                         connections = [swarm.connections[info.peer_id]]
-                        logger.info(f"📊 Active connections to peer {info.peer_id}: {len(connections)}")
+                        logger.info(f"Active connections to peer {info.peer_id}: {len(connections)}")
                     else:
-                        logger.info(f"📊 No direct connection info available for peer {info.peer_id}")
+                        logger.info(f"No direct connection info available for peer {info.peer_id}")
                 except Exception as conn_err:
-                    logger.warning(f"⚠️  Could not check connection status: {conn_err}")
+                    logger.warning(f"Could not check connection status: {conn_err}")
                 
                 # Wait for PubSub protocol negotiation
                 logger.info(f"⏳ Waiting for PubSub protocol negotiation...")
@@ -347,11 +347,11 @@ class HeadlessService:
                 await self._send_system_message(f"Connected to peer: {str(info.peer_id)[:8]}")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to connect to {addr_str}: {e}")
+                logger.error(f"Failed to connect to {addr_str}: {e}")
                 await self._send_system_message(f"Failed to connect to {addr_str}: {e}")
     
     async def _inspect_peer_protocols(self, peer_id):
-        """Inspect and log all protocols supported by a peer."""
+        """Inspect and log protocols supported by peer."""
         try:
             logger.info(f"🔍 Checking peerstore for peer: {peer_id}")
             
@@ -380,15 +380,15 @@ class HeadlessService:
                     logger.info(f"📋 No protocols found for peer {peer_id} yet (may still be negotiating)")
                     
             except Exception as proto_err:
-                logger.info(f"🔍 Protocol details not accessible: {proto_err}")
-                logger.info(f"✅ Peer {peer_id} connected successfully")
+                logger.info(f"Protocol details not accessible: {proto_err}")
+                logger.info(f"Peer {peer_id} connected successfully")
                     
         except Exception as e:
-            logger.warning(f"⚠️  Error inspecting peer protocols: {e}")
-            logger.info(f"✅ Peer {peer_id} connected successfully")
+            logger.warning(f"Error inspecting peer protocols: {e}")
+            logger.info(f"Peer {peer_id} connected successfully")
     
     async def _check_pubsub_status(self, peer_id):
-        """Check the PubSub connection status with a specific peer."""
+        """Check PubSub connection status with peer."""
         try:
             logger.info(f"🔍 Checking PubSub status for peer: {peer_id}")
             
@@ -399,7 +399,7 @@ class HeadlessService:
                 logger.info(f"  PubSub peer {i}: {p}")
             
             if peer_id in self.pubsub.peers:
-                logger.info(f"✅ Peer {peer_id} is in PubSub mesh")
+                logger.info(f"Peer {peer_id} is in PubSub mesh")
                 
                 # Check GossipSub specific status
                 if hasattr(self.pubsub, 'router') and hasattr(self.pubsub.router, 'mesh'):
@@ -409,22 +409,22 @@ class HeadlessService:
                     for topic, topic_peers in mesh.items():
                         logger.info(f"    Topic '{topic}': {len(topic_peers)} peers")
                         if peer_id in topic_peers:
-                            logger.info(f"    ✅ Peer {peer_id} is in mesh for topic '{topic}'")
+                            logger.info(f"    Peer {peer_id} is in mesh for topic '{topic}'")
                         else:
-                            logger.warning(f"    ❌ Peer {peer_id} is NOT in mesh for topic '{topic}'")
+                            logger.warning(f"    Peer {peer_id} is NOT in mesh for topic '{topic}'")
             else:
-                logger.warning(f"❌ Peer {peer_id} is NOT in PubSub mesh")
+                logger.warning(f"Peer {peer_id} is NOT in PubSub mesh")
                 logger.info("🔧 Possible reasons:")
                 logger.info("  1. PubSub protocol negotiation failed")
                 logger.info("  2. Peer doesn't support compatible GossipSub version")
                 logger.info("  3. Network issues preventing PubSub handshake")
                 
         except Exception as e:
-            logger.error(f"❌ Error checking PubSub status: {e}")
+            logger.error(f"Error checking PubSub status: {e}")
     
     async def _setup_chat_room(self):
-        """Setup the chat room."""
-        logger.info("Setting up chat room...")
+        """Initialize chat room."""
+        logger.info("Setting up chat room")
         
         self.chat_room = await ChatRoom.join_chat_room(
             host=self.host,
@@ -602,7 +602,7 @@ class HeadlessService:
                                 # Connect to the peer
                                 logger.info(f"Attempting to connect to peer: {peer_info.peer_id}")
                                 await self.host.connect(peer_info)
-                                logger.info(f"✅ Successfully connected to peer: {peer_info.peer_id}")
+                                logger.info(f"Successfully connected to peer: {peer_info.peer_id}")
                                 await self._send_system_message(f"Connected to peer: {peer_info.peer_id}")
                             else:
                                 logger.error(f"Could not extract peer info from multiaddress: {multiaddr_str}")
@@ -826,7 +826,7 @@ class HeadlessService:
                 # Parse the identify response using official parser
                 identify_info = parse_identify_response(response_bytes)
                 
-                logger.info(f"✅ Received identify info from {peer_id}")
+                logger.info(f" Received identify info from {peer_id}")
                 logger.info(f"  - Protocol Version: {identify_info.protocol_version}")
                 logger.info(f"  - Agent Version: {identify_info.agent_version}")
                 logger.info(f"  - Public Key: {len(identify_info.public_key)} bytes")
@@ -849,7 +849,7 @@ class HeadlessService:
                 await stream.close()
                 
         except Exception as e:
-            logger.error(f"❌ Failed to get identify info from peer {peer_id}: {e}")
+            logger.error(f"Failed to get identify info from peer {peer_id}: {e}")
             return None
     
     async def get_cached_peer_info(self, peer_id: str):
@@ -873,7 +873,7 @@ class HeadlessService:
             if identify_info:
                 return self.peer_info_cache[peer_id_str]
         except Exception as e:
-            logger.error(f"❌ Failed to get peer info for {peer_id_str}: {e}")
+            logger.error(f"Failed to get peer info for {peer_id_str}: {e}")
         
         return None
     
