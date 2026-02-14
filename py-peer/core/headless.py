@@ -40,6 +40,7 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+
 from libp2p.host.autonat.autonat import AutoNATService 
 from libp2p.relay.circuit_v2.protocol import (
     CircuitV2Protocol,
@@ -51,28 +52,11 @@ from libp2p.relay.circuit_v2.resources import RelayLimits
 from libp2p.relay.circuit_v2.discovery import RelayDiscovery, RelayInfo 
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
 from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+                               
 
 from chatroom.chatroom import ChatRoom, ChatMessage
-
+from utils.constants import * 
 logger = logging.getLogger("headless")
-
-# Constants
-DISCOVERY_SERVICE_TAG = "universal-connectivity"
-PROTOCOL_ID_LIST = [PROTOCOL_ID, PROTOCOL_ID_V11]
-DEFAULT_PORT = 9095
-
-# Bootstrap nodes for peer discovery
-BOOTSTRAP_PEERS = [
-    "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa", 
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zp7ykQCj2gRNdrFeqQ1vG13rMb4sPS",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
-]
-
 
 def find_free_port() -> int:
     """Find a free port on localhost."""
@@ -92,7 +76,7 @@ def filter_compatible_peer_info(peer_info) -> bool:
     return False
 
 async def maintain_connections(host) -> None:
-    """Maintain persistent connections to healthy peers."""
+    """Maintain connections to ensure the host remains connected to healthy peers."""
     while True:
         try:
             connected_peers = host.get_connected_peers()
@@ -133,7 +117,7 @@ async def maintain_connections(host) -> None:
 
 class HeadlessService:
     """
-    Headless service managing libp2p components and UI communication via queues.
+    Headless service that manages libp2p components and provides data to UI through queues.
     """
 
     def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None, relay_addrs: List[str] = None, relay_server_mode: bool = True, enable_autonat: bool = True, enable_dcutr: bool = True):
@@ -145,6 +129,20 @@ class HeadlessService:
         self.seed = seed
         self.topic = topic  # Custom topic to use instead of default
 
+        # NAT traversal config 
+
+        self.relay_addrs : List[str] = relay_addrs or []
+        self.relay_server_mode : bool = relay_server_mode
+        self.enable_autonat : bool = enable_autonat
+        self.enable_dcutr : bool = enable_dcutr
+
+        self.autonat: AutoNATService = None          # AutoNATService instance
+        self.circuit_v2: CircuitV2Protocol = None    # CircuitV2Protocol instance
+        self.relay_config: RelayConfig = None        # RelayConfig instance
+        self.circuit_v2_transport: CircuitV2Transport = None  # CircuitV2Transport instance
+        self.relay_discovery:RelayDiscovery = None   # RelayDiscovery instance
+        self.dcutr: DCUtRProtocol = None             # DCUtRProtocol instance
+
         # libp2p components
         self.host = None
         self.pubsub = None
@@ -152,14 +150,6 @@ class HeadlessService:
         self.dht = None
         self.chat_room = None
         
-        # NAT Traversal 
-        self.autonat: AutoNATService = None          # AutoNATService instance
-        self.circuit_v2: CircuitV2Protocol = None    # CircuitV2Protocol instance
-        self.relay_config: RelayConfig = None        # RelayConfig instance
-        self.circuit_v2_transport: CircuitV2Transport = None  # CircuitV2Transport instance
-        self.relay_discovery:RelayDiscovery = None   # RelayDiscovery instance
-        self.dcutr: DCUtRProtocol = None   
-
         # Service state
         self.running = False
         self.ready = False
@@ -183,12 +173,16 @@ class HeadlessService:
         self.ready_event = trio.Event()
         self.stop_event = trio.Event()
         
-        if not ui_mode:  # Only log initialization if not in UI mode
-            logger.info(f"HeadlessService initialized - nickname: {nickname}, port: {self.port}, strict_signing: {strict_signing}")
+        if not ui_mode:
+            logger.info(
+                f"HeadlessService init — nickname: {nickname}, port: {self.port}, "
+                f"strict_signing: {strict_signing}, relay_server_mode: {relay_server_mode}, "
+                f"relay_addrs: {self.relay_addrs}, autonat: {enable_autonat}, dcutr: {enable_dcutr}"
+            )
     
     async def monitor_peers(self):
         while True:
-            logger.info("Testing monitor_peers function")
+            print("testing print")
             logger.info("testing status")
             logger.info(f"Connected peers are: len{self.host.get_connected_peers()}")
             logger.info(f"peers in peer store are: len{self.host.get_peerstore().peers_with_addrs()}")
@@ -197,8 +191,8 @@ class HeadlessService:
             await trio.sleep(5)
 
     async def start(self):
-        """Initialize and start headless service."""
-        logger.info("Starting headless service")
+        """Start the headless service."""
+        logger.info("Starting headless service...")
         
         try:
             # Create queues for communication with UI
@@ -222,7 +216,7 @@ class HeadlessService:
             raise
     
     async def _run_service(self):
-        """Execute main service loop."""
+        """Run the main service loop."""
         key_pair = create_new_key_pair()
         
         # Create listen address
@@ -235,11 +229,68 @@ class HeadlessService:
             # bootstrap = BOOTSTRAP_PEERS
         )
 
-        # Register identify protocol handler for go-libp2p compatibility
-        logger.info("Registering identify protocol handler (raw protobuf format)")
+        # configure AutoNAT if enabled 
+        if self.enable_autonat:
+            try:
+                self.autonat = AutoNATService(self.host)
+                logger.info("AutoNAT service created successfully")
+            except Exception as e: 
+                logger.warning(f"AutoNAT service could not be created: {e}")
+
+        # Configure relay if enabled (but don't register handlers yet - wait for host.run())
+        if self.relay_server_mode or self.relay_addrs:
+            try:
+                # Configure relay limits (following relay_example.py)
+                limits = RelayLimits(
+                    duration=DEFAULT_RELAY_LIMIT_DURATION,  
+                    data=DEFAULT_RELAY_LIMIT_DATA_SIZE, 
+                    max_circuit_conns=DEFAULT_RELAY_MAX_CIRCUIT_CONNS,
+                    max_reservations=DEFAULT_RELAY_MAX_RESERVATIONS,
+                )
+                
+                # Configure relay roles
+                if self.relay_server_mode:
+                    # Relay server: HOP + STOP + CLIENT
+                    roles = RelayRole.HOP | RelayRole.STOP | RelayRole.CLIENT
+                else:
+                    # Relay client: STOP + CLIENT only
+                    roles = RelayRole.STOP | RelayRole.CLIENT
+                
+                self.relay_config = RelayConfig(
+                    roles=roles,
+                    limits=limits,
+                )
+                
+                # Create CircuitV2Protocol with limits
+                self.circuit_v2 = CircuitV2Protocol(
+                    host=self.host,
+                    limits=limits,
+                    allow_hop=self.relay_server_mode,
+                )
+                mode_label = "HOP server" if self.relay_server_mode else "STOP client"
+                logger.info(f"CircuitV2Protocol created ({mode_label} mode) with limits")
+                logger.info(f"  - Relay roles: {roles}")
+                logger.info(f"  - Duration: {limits.duration}s, Data: {limits.data} bytes")
+                logger.info(f"  - Max connections: {limits.max_circuit_conns}, Max reservations: {limits.max_reservations}")
+            except Exception as e:
+                logger.warning(f"CircuitV2Protocol init failed (non-fatal): {e}")
+
+        # Dcutr protocol check 
+        if self.enable_dcutr and self.relay_addrs:
+            try:
+                self.dcutr = DCUtRProtocol(host=self.host)
+                logger.info("DCUtRProtocol created (hole punching enabled)")
+            except Exception as e:
+                logger.warning(f"DCUtRProtocol init failed (non-fatal): {e}")
+        elif self.enable_dcutr and not self.relay_addrs:
+            logger.info(" DCUtR skipped — requires --relay to be set first")
+
+
+        # Register identify protocol handler
+        logger.info("Registering identify protocol handler (raw protobuf format for go-libp2p compatibility)")
         identify_handler = identify_handler_for(self.host, use_varint_format=True)
         self.host.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
-        logger.info(f"Identify protocol handler registered for {IDENTIFY_PROTOCOL_ID}")
+        logger.info(f"Identify protocol handler registered for {IDENTIFY_PROTOCOL_ID} (raw format)")
 
         # Create DHT with random walk enabled
         self.dht = KadDHT(self.host, DHTMode.SERVER, enable_random_walk=True)
@@ -250,23 +301,23 @@ class HeadlessService:
         logger.info(f"Listening on: {listen_addr}")
         logger.info(f"Full multiaddr: {self.full_multiaddr}")
         
-        # Configure GossipSub protocol
+        # Log GossipSub protocol configuration
         logger.info(f"Configuring GossipSub with protocols: {PROTOCOL_ID_LIST}")
-        logger.info(f"  Protocol 1: {PROTOCOL_ID}")
-        logger.info(f"  Protocol 2: {PROTOCOL_ID_V11}")
+        logger.info(f"Protocol 1: {PROTOCOL_ID}")
+        logger.info(f"Protocol 2: {PROTOCOL_ID_V11}")
         
         # Create GossipSub with optimized parameters (matching working pubsub.py)
         self.gossipsub = GossipSub(
             protocols=PROTOCOL_ID_LIST,
-            degree=3,
-            degree_low=2,
-            degree_high=4,
-            gossip_window=2,  # Smaller window for faster gossip
-            gossip_history=5,  # Keep more history
-            heartbeat_initial_delay=2.0,  # Start heartbeats sooner
-            heartbeat_interval=5,  # More frequent heartbeats for testing
+            degree=DEFAULT_GOSSIPSUB_DEGREE,
+            degree_low=DEFAULT_GOSSIPSUB_DEGREE_LOW,
+            degree_high=DEFAULT_GOSSIPSUB_DEGREE_HIGH,
+            gossip_window=DEFAULT_GOSSIPSUB_GOSSIP_WINDOW, 
+            gossip_history=DEFAULT_GOSSIPSUB_GOSSIP_HISTORY,
+            heartbeat_initial_delay=DEFAULT_GOSSIPSUB_HEARTBEAT_INITIAL_DELAY, 
+            heartbeat_interval=DEFAULT_GOSSIPSUB_HEARTBEAT_INTERVAL, 
         )
-        logger.info("GossipSub router created successfully")
+        logger.info(" GossipSub router created successfully")
         
         # Create PubSub
         logger.info(f"Creating PubSub with strict_signing={self.strict_signing}")
@@ -280,41 +331,303 @@ class HeadlessService:
                 async with background_trio_service(self.pubsub):
                     async with background_trio_service(self.gossipsub):
                         async with background_trio_service(self.dht):
-                            logger.info("Pubsub, GossipSub, and DHT services started.")
-                            await self.pubsub.wait_until_ready()
-                            logger.info("Pubsub ready and operational.")
-                            logger.info("DHT service started with random walk enabled.")
-                            bootstrap = None
-                            if BOOTSTRAP_PEERS:
-                                bootstrap = BootstrapDiscovery(self.host.get_network(), BOOTSTRAP_PEERS)
-                                await bootstrap.start()
-                            # Setup chat room BEFORE connections so topics are subscribed
-                            # This ensures GossipSub protocol negotiation succeeds when connecting
-                            await self._setup_chat_room()
-                            # Now setup connections after we're subscribed to topics
-                            await self._setup_connections()
-                            
-                            # Setup connection event handlers for DHT
-                            
-                            # Mark service as ready
-                            self.ready = True
-                            self.ready_event.set()
-                            logger.info("✅ Headless service is ready")
-                            
-                            # Start message processing and wait for stop
-                            async with trio.open_nursery() as nursery:
-                                nursery.start_soon(self._process_messages)
-                                nursery.start_soon(self._process_outgoing_messages)
-                                nursery.start_soon(self._process_topic_subscriptions)
-                                nursery.start_soon(self._process_peer_connections)
-                                nursery.start_soon(self._wait_for_stop)
-                                nursery.start_soon(self.monitor_peers)
-                                nursery.start_soon(maintain_connections, self.host)
+                            await self._start_nat_and_run()
 
             except (MultiselectClientError, StreamFailure) as e:
-                logger.log(f"The protocol negotitaion failed: {e}")
-                pass
+                logger.error(f"The protocol negotiation failed: {e}")
+                await self._send_system_message(f"Protocol negotiation failed: {e}")
     
+    async def _start_nat_and_run(self):
+        """
+        Start NAT traversal services as background tasks, then run the main loop.
+        Stream handlers are registered AFTER host.run() starts to ensure proper protocol advertisement.
+        """
+        logger.info("Pubsub, GossipSub, DHT started.")
+        await self.pubsub.wait_until_ready()
+        logger.info("Pubsub ready.")
+
+        # Register circuit relay stream handlers AFTER host.run() starts 
+        if self.circuit_v2 is not None:
+            logger.info("[Relay] Registering circuit relay stream handlers...")
+            self.host.set_stream_handler(RELAY_PROTOCOL_ID, self.circuit_v2._handle_hop_stream)
+            self.host.set_stream_handler(RELAY_STOP_PROTOCOL_ID, self.circuit_v2._handle_stop_stream)
+            logger.info(f"[Relay] Stream handlers registered: {RELAY_PROTOCOL_ID}, {RELAY_STOP_PROTOCOL_ID}")
+            await self._send_system_message(
+                f"[Relay] Handlers registered - HOP: {RELAY_PROTOCOL_ID}, STOP: {RELAY_STOP_PROTOCOL_ID}"
+            )
+            
+            # Create CircuitV2Transport (REQUIRED for relay to work)
+            self.circuit_v2_transport = CircuitV2Transport(self.host, self.circuit_v2, self.relay_config)
+            logger.info("[Relay] CircuitV2Transport created")
+            logger.info(
+                f"[Relay] Transport config - enable_hop={self.relay_config.enable_hop}, "
+                f"enable_stop={self.relay_config.enable_stop}, enable_client={self.relay_config.enable_client}"
+            )
+            await self._send_system_message(
+                f"[Relay] Transport initialized - HOP: {self.relay_config.enable_hop}, "
+                f"STOP: {self.relay_config.enable_stop}, CLIENT: {self.relay_config.enable_client}"
+            )
+            
+            # If we're a client with relay addresses, create and link discovery service
+            if self.relay_addrs and not self.relay_server_mode:
+                try:
+                    # Create discovery with auto_reserve=True for automatic relay reservations
+                    self.relay_discovery = RelayDiscovery(
+                        host=self.host,
+                        auto_reserve=True,  # Enable automatic reservations
+                    )
+                    # Link discovery to transport
+                    self.circuit_v2_transport.discovery = self.relay_discovery
+                    logger.info("[Relay] RelayDiscovery created and linked to transport (auto_reserve=True)")
+                    await self._send_system_message("[Relay] Discovery service initialized for automatic reservations")
+                except Exception as e:
+                    logger.warning(f"RelayDiscovery creation failed: {e}")
+
+        # DEBUG relay server state
+        await self._send_system_message(
+            f"[Debug] relay_server_mode={self.relay_server_mode}, "
+            f"circuit_v2={self.circuit_v2 is not None}, "
+            f"allow_hop={getattr(self.circuit_v2, 'allow_hop', 'N/A')}"
+        )
+
+        async with trio.open_nursery() as nat_nursery:
+            # Start CircuitV2Protocol as background service
+            if self.circuit_v2 is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.circuit_v2, "CircuitV2Protocol"
+                )
+                await trio.sleep(1)
+                
+            if self.relay_discovery is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.relay_discovery, "RelayDiscovery"
+                )
+                logger.info("[Relay] RelayDiscovery background service started")
+                await self._send_system_message("[Relay] Discovery service running")
+                await trio.sleep(1)
+                
+            if self.circuit_v2 is not None:
+                try:
+                    mux = self.host.get_mux()
+                    if hasattr(mux, 'handlers'):
+                        protos = list(mux.handlers.keys())
+                    elif hasattr(mux, '_handlers'):
+                        protos = list(mux._handlers.keys())
+                    elif hasattr(mux, 'get_protocols'):
+                        protos = mux.get_protocols()
+                    else:
+                        protos = [attr for attr in dir(mux)]
+                    
+                    hop_str = str(RELAY_PROTOCOL_ID) 
+                    stop_str = str(RELAY_STOP_PROTOCOL_ID) 
+                    await self._send_system_message(f"Registered protocols: {protos}")
+                    await self._send_system_message(
+                        f"HOP ({hop_str}): {hop_str in str(protos)}, "
+                        f"STOP ({stop_str}): {stop_str in str(protos)}"
+                    )
+                except Exception as e:
+                    await self._send_system_message(f"Mux inspection failed: {e}")
+
+            if self.dcutr is not None:
+                nat_nursery.start_soon(
+                    self._run_background_service, self.dcutr, "DCUtRProtocol"
+                )
+                await trio.sleep(0.5)
+
+            # Extra delay to let services fully initialise their stream handlers
+            await trio.sleep(1)
+
+            # Bootstrap discovery
+            if BOOTSTRAP_PEERS:
+                bootstrap = BootstrapDiscovery(self.host.get_network(), BOOTSTRAP_PEERS)
+                await bootstrap.start()
+
+            # Subscribe to topics before connecting
+            await self._setup_chat_room()
+
+            # Connect to regular peers
+            await self._setup_connections()
+
+            # Mark ready BEFORE relay setup — this unblocks run_headless_in_thread's
+            # polling loop so the UI starts immediately.
+            self.ready = True
+            self.ready_event.set()
+            logger.info("Headless service is ready")
+            await self._send_system_message("Service ready")
+
+            # Relay setup runs after ready is set, with per-relay timeouts
+            await self._setup_relay_connections()
+
+            # Main processing loop
+            async with trio.open_nursery() as main_nursery:
+                main_nursery.start_soon(self._process_messages)
+                main_nursery.start_soon(self._process_outgoing_messages)
+                main_nursery.start_soon(self._process_topic_subscriptions)
+                main_nursery.start_soon(self._process_peer_connections)
+                main_nursery.start_soon(self._process_relay_connections)
+                main_nursery.start_soon(self._wait_for_stop)
+                main_nursery.start_soon(self.monitor_peers)
+                main_nursery.start_soon(maintain_connections, self.host)
+
+    async def _run_background_service(self, service, name: str):
+        """
+        Generic wrapper to run trio-compatible background services.
+        """
+        try:
+            logger.info(f"Starting {name} background service...")
+            async with background_trio_service(service):
+                await trio.sleep_forever()
+        except Exception as e:
+            logger.warning(f"{name} crashed: {e}")
+
+
+    async def _setup_relay_connections(self):
+        """Connect to relay servers and make reservations."""
+        if not self.relay_addrs:
+            return
+
+        await self._send_system_message(f"[Relay] Starting relay setup with {len(self.relay_addrs)} relay(s)...")
+        
+        # If not running as relay server, wait longer for relay to fully start up and advertise protocols
+        if not self.relay_server_mode:
+            await self._send_system_message("[Relay] Waiting 5 seconds for relay server to initialize and advertise protocols...")
+            await trio.sleep(5)
+
+        for addr_str in self.relay_addrs:
+            await self._send_system_message(f"[Relay] Processing relay: {addr_str}")
+            try:
+                await self._send_system_message(f"[Relay] Parsing multiaddr...")
+                addr = multiaddr.Multiaddr(addr_str)
+                info = info_from_p2p_addr(addr)
+                await self._send_system_message(f"[Relay] Parsed relay peer ID: {info.peer_id}")
+                await self._send_system_message(f"[Relay] Relay addresses: {info.addrs}")
+
+                # Check if already connected
+                if info.peer_id in self.host.get_network().connections:
+                    await self._send_system_message(f"[Relay] Already connected to {info.peer_id}")
+                    connected = True
+                else:
+                    await self._send_system_message(f"[Relay] Connecting to relay {info.peer_id}...")
+                    connected = False
+                    with trio.move_on_after(10) as connect_scope:
+                        await self.host.connect(info)
+                        connected = True
+                        await self._send_system_message(f"[Relay] TCP connection established to relay: {info.peer_id}")
+
+                    if connect_scope.cancelled_caught:
+                        await self._send_system_message(f"[Relay] ⏱Timed out connecting to relay {addr_str} after 10s — skipping")
+                        continue
+
+                if not connected:
+                    await self._send_system_message(f"[Relay] Failed to connect to relay")
+                    continue
+
+                # Give relay time to register stream handlers and advertise protocols
+                await self._send_system_message(f"[Relay] Waiting 5s for relay protocol advertisement...")
+                await trio.sleep(5)
+
+                hop_proto = str(RELAY_PROTOCOL_ID)
+                try:
+                    protos = self.host.get_peerstore().get_protocols(info.peer_id)
+                    proto_strs = [str(p) for p in protos] if protos else []
+                    await self._send_system_message(f"[Relay] Relay protocols: {proto_strs}")
+                    if hop_proto in proto_strs:
+                        await self._send_system_message(f"[Relay] Relay HAS {hop_proto}")
+                    else:
+                        await self._send_system_message(f"[Relay] Relay MISSING {hop_proto}")
+                        await self._send_system_message("[Relay] Waiting additional 3s...")
+                        await trio.sleep(3)
+                        protos = self.host.get_peerstore().get_protocols(info.peer_id)
+                        proto_strs = [str(p) for p in protos] if protos else []
+                        await self._send_system_message(f"[Relay] Relay protocols (retry): {proto_strs}")
+                        if hop_proto in proto_strs:
+                            await self._send_system_message(f"[Relay]  Relay NOW HAS {hop_proto}")
+                        else:
+                            await self._send_system_message(f"[Relay]  Relay STILL MISSING {hop_proto}")
+                except Exception as e:
+                    await self._send_system_message(f"[Relay] Could not read relay protocols: {e}")
+
+                await self._send_system_message(
+                    f"[Relay] Our circuit_v2: {self.circuit_v2 is not None}, "
+                    f"allow_hop: {getattr(self.circuit_v2, 'allow_hop', 'N/A')}, "
+                    f"relay_discovery: {self.relay_discovery is not None}"
+                )
+
+                if self.relay_discovery is not None:
+                    # CRITICAL: Add relay to _discovered_relays BEFORE calling make_reservation
+                    # make_reservation checks _discovered_relays and fails if peer is not there!
+                    now = time.time()
+                    self.relay_discovery._discovered_relays[info.peer_id] = RelayInfo(
+                        peer_id=info.peer_id,
+                        discovered_at=now,
+                        last_seen=now,
+                    )
+                    await self._send_system_message(f"[Relay] Added relay {str(info.peer_id)[:12]} to discovered_relays")
+
+                    await self._send_system_message(f"[Relay] Starting reservation process with relay {info.peer_id}...")
+                    reserved = False
+                    for attempt in range(1, 4):
+                        await self._send_system_message(f"[Relay] Attempting reservation (try {attempt}/3)...")
+                        with trio.move_on_after(15) as reserve_scope:
+                            reserved = await self.relay_discovery.make_reservation(info.peer_id)
+
+                        if reserve_scope.cancelled_caught:
+                            await self._send_system_message(f"[Relay] ⏱Reservation timed out (attempt {attempt}/3)")
+                            await trio.sleep(2 * attempt)
+                            continue
+
+                        if reserved:
+                            await self._send_system_message(f"[Relay] Reservation GRANTED by {str(info.peer_id)[:12]} on attempt {attempt}/3")
+                            await self._send_system_message(f"Relay active via {str(info.peer_id)[:12]}")
+                            
+                            # Log relay addresses
+                            relay_addrs = [str(a) for a in self.host.get_addrs() if "p2p-circuit" in str(a)]
+                            if relay_addrs:
+                                await self._send_system_message(f"[Relay] Your relay address: {relay_addrs[0]}")
+                            break
+                        else:
+                            await self._send_system_message(f"[Relay] Reservation DENIED by {str(info.peer_id)[:12]} (attempt {attempt}/3)")
+                            await self._send_system_message(f"[Relay] Retrying in {2 * attempt}s...")
+                            await trio.sleep(2 * attempt)
+
+                    if not reserved:
+                        await self._send_system_message(f"[Relay] All 3 reservation attempts FAILED for {str(info.peer_id)[:12]}")
+                        await self._send_system_message(f"[Relay] Possible issues: relay not in HOP mode, relay overloaded, or protocol mismatch")
+                else:
+                    await self._send_system_message(f"[Relay] No RelayDiscovery available — skipping reservation")
+
+            except Exception as e:
+                await self._send_system_message(f"[Relay] Exception during relay setup: {type(e).__name__}: {e}")
+                logger.exception(f"[Relay] Full traceback for {addr_str}:")
+
+
+    async def _request_relay_reservation(self, relay_peer_id: ID):
+        """
+        Request a Circuit Relay v2 reservation via RelayDiscovery.make_reservation().
+        Returns True on success (STATUS_OK from relay), False if denied.
+        Failure is non-fatal — direct connections still work without a reservation.
+        """
+        if self.relay_discovery is None:
+            logger.info(f"ℹNo RelayDiscovery — skipping reservation for {relay_peer_id}")
+            return
+
+        try:
+            logger.info(f"📡 Requesting relay reservation from: {relay_peer_id}")
+            # RelayDiscovery.make_reservation(peer_id: ID) -> bool
+            success = await self.relay_discovery.make_reservation(relay_peer_id)
+            if success:
+                logger.info(f"Relay reservation granted by {relay_peer_id}")
+                await self._send_system_message(
+                    f"Relay reservation active via {str(relay_peer_id)[:12]}"
+                )
+            else:
+                logger.warning(f"Relay {relay_peer_id} denied reservation")
+                await self._send_system_message(
+                    f"Relay reservation denied by {str(relay_peer_id)[:12]}"
+                )
+        except Exception as e:
+            logger.warning(f"Relay reservation failed (non-fatal): {e}")
+
     async def _setup_connections(self):
         """Setup connections to specified peers with detailed protocol logging."""
         if not self.connect_addrs:
@@ -330,11 +643,11 @@ class HeadlessService:
                 # Check if already connected
                 existing_conns = self.host.get_network().connections.get(info.peer_id)
                 if existing_conns:
-                    logger.info(f"Already connected to peer: {info.peer_id}, skipping connection attempt")
+                    logger.info(f" Already connected to peer: {info.peer_id}, skipping connection attempt")
                     continue
                 
                 # Log connection attempt
-                logger.info(f"🔗 Initiating connection to peer: {info.peer_id}")
+                logger.info(f"Initiating connection to peer: {info.peer_id}")
                 await self.host.connect(info)
                 logger.info(f"TCP connection established to peer: {info.peer_id}")
                 
@@ -358,7 +671,7 @@ class HeadlessService:
                     logger.warning(f"Could not check connection status: {conn_err}")
                 
                 # Wait for PubSub protocol negotiation
-                logger.info(f"⏳ Waiting for PubSub protocol negotiation...")
+                logger.info(f"Waiting for PubSub protocol negotiation...")
                 await trio.sleep(3)
                 
                 # Check final PubSub status
@@ -371,11 +684,9 @@ class HeadlessService:
                 await self._send_system_message(f"Failed to connect to {addr_str}: {e}")
     
     async def _inspect_peer_protocols(self, peer_id):
-        """Inspect and log protocols supported by peer."""
+        """Inspect and log all protocols supported by a peer."""
         try:
-            logger.info(f"🔍 Checking peerstore for peer: {peer_id}")
-            
-            # Get peer's protocols from peerstore (simplified approach)
+            logger.info(f"Checking peerstore for peer: {peer_id}")
             peerstore = self.host.get_peerstore()
             
             # Check if we can access protocols - different py-libp2p versions have different APIs
@@ -386,18 +697,18 @@ class HeadlessService:
                     protocols = peerstore.protocols(peer_id)
                 else:
                     # Fallback - just log that we connected successfully
-                    logger.info(f"✅ Successfully connected to peer {peer_id}")
-                    logger.info(f"🔍 Protocol inspection not available in this py-libp2p version")
+                    logger.info(f"Successfully connected to peer {peer_id}")
+                    logger.info(f"Protocol inspection not available in this py-libp2p version")
                     return
                     
                 if protocols:
-                    logger.info(f"📋 Peer {peer_id} supports {len(protocols)} protocols:")
+                    logger.info(f"Peer {peer_id} supports {len(protocols)} protocols:")
                     for i, protocol in enumerate(protocols, 1):
                         logger.info(f"  {i}: {protocol}")
                         if "meshsub" in str(protocol) or "gossipsub" in str(protocol):
-                            logger.info(f"  🎯 Found PubSub protocol: {protocol}")
+                            logger.info(f"  Found PubSub protocol: {protocol}")
                 else:
-                    logger.info(f"📋 No protocols found for peer {peer_id} yet (may still be negotiating)")
+                    logger.info(f" No protocols found for peer {peer_id} yet (may still be negotiating)")
                     
             except Exception as proto_err:
                 logger.info(f"Protocol details not accessible: {proto_err}")
@@ -408,13 +719,11 @@ class HeadlessService:
             logger.info(f"Peer {peer_id} connected successfully")
     
     async def _check_pubsub_status(self, peer_id):
-        """Check PubSub connection status with peer."""
+        """Check the PubSub connection status with a specific peer."""
         try:
-            logger.info(f"🔍 Checking PubSub status for peer: {peer_id}")
-            
-            # Check if peer is in pubsub.peers
+            logger.info(f"Checking PubSub status for peer: {peer_id}")
             pubsub_peers = list(self.pubsub.peers.keys())
-            logger.info(f"📡 Total PubSub peers: {len(pubsub_peers)}")
+            logger.info(f"Total PubSub peers: {len(pubsub_peers)}")
             for i, p in enumerate(pubsub_peers, 1):
                 logger.info(f"  PubSub peer {i}: {p}")
             
@@ -424,27 +733,27 @@ class HeadlessService:
                 # Check GossipSub specific status
                 if hasattr(self.pubsub, 'router') and hasattr(self.pubsub.router, 'mesh'):
                     mesh = self.pubsub.router.mesh
-                    logger.info(f"🕸️  GossipSub mesh status:")
-                    logger.info(f"    Mesh topics: {list(mesh.keys())}")
+                    logger.info(f"GossipSub mesh status:")
+                    logger.info(f"Mesh topics: {list(mesh.keys())}")
                     for topic, topic_peers in mesh.items():
                         logger.info(f"    Topic '{topic}': {len(topic_peers)} peers")
                         if peer_id in topic_peers:
-                            logger.info(f"    Peer {peer_id} is in mesh for topic '{topic}'")
+                            logger.info(f"Peer {peer_id} is in mesh for topic '{topic}'")
                         else:
-                            logger.warning(f"    Peer {peer_id} is NOT in mesh for topic '{topic}'")
+                            logger.warning(f"Peer {peer_id} is NOT in mesh for topic '{topic}'")
             else:
                 logger.warning(f"Peer {peer_id} is NOT in PubSub mesh")
-                logger.info("🔧 Possible reasons:")
-                logger.info("  1. PubSub protocol negotiation failed")
-                logger.info("  2. Peer doesn't support compatible GossipSub version")
-                logger.info("  3. Network issues preventing PubSub handshake")
+                logger.info("Possible reasons:")
+                logger.info(" 1. PubSub protocol negotiation failed")
+                logger.info(" 2. Peer doesn't support compatible GossipSub version")
+                logger.info(" 3. Network issues preventing PubSub handshake")
                 
         except Exception as e:
             logger.error(f"Error checking PubSub status: {e}")
     
     async def _setup_chat_room(self):
-        """Initialize chat room."""
-        logger.info("Setting up chat room")
+        """Setup the chat room."""
+        logger.info("Setting up chat room...")
         
         self.chat_room = await ChatRoom.join_chat_room(
             host=self.host,
@@ -608,7 +917,7 @@ class HeadlessService:
                 try:
                     multiaddr_str = self.peer_connection_queue.sync_q.get_nowait()
                     if multiaddr_str:
-                        logger.info(f"Processing peer connection request: {multiaddr_str}")
+                        await self._send_system_message(f"[Connect] Processing connection request: {multiaddr_str}")
                         
                         # Parse and connect to the peer
                         try:
@@ -620,17 +929,15 @@ class HeadlessService:
                             
                             if peer_info:
                                 # Connect to the peer
-                                logger.info(f"Attempting to connect to peer: {peer_info.peer_id}")
+                                await self._send_system_message(f"[Connect] Connecting to peer: {peer_info.peer_id}")
                                 await self.host.connect(peer_info)
-                                logger.info(f"Successfully connected to peer: {peer_info.peer_id}")
-                                await self._send_system_message(f"Connected to peer: {peer_info.peer_id}")
+                                await self._send_system_message(f"[Connect] Successfully connected to peer: {peer_info.peer_id}")
                             else:
-                                logger.error(f"Could not extract peer info from multiaddress: {multiaddr_str}")
-                                await self._send_system_message(f"Invalid multiaddress format")
+                                await self._send_system_message(f"[Connect] Invalid multiaddress format")
                                 
                         except Exception as e:
-                            logger.error(f"Failed to connect to peer {multiaddr_str}: {e}")
-                            await self._send_system_message(f"Connection failed: {str(e)}")
+                            await self._send_system_message(f"[Connect] Connection failed: {type(e).__name__}: {e}")
+                            logger.exception(f"Full traceback for peer connection:")
                             
                 except Empty:
                     # No request available, that's fine
@@ -641,6 +948,83 @@ class HeadlessService:
                     
             except Exception as e:
                 logger.error(f"Error in peer connection processing: {e}")
+                await trio.sleep(0.1)
+    
+    async def _process_relay_connections(self):
+        """Process relay connection requests from UI."""
+        
+        # Initialize relay connection queue if needed
+        if not hasattr(self, 'relay_connection_queue'):
+            self.relay_connection_queue = janus.Queue()
+        
+        while self.running:
+            try:
+                # Check for relay connection requests (non-blocking)
+                try:
+                    relay_addr_str = self.relay_connection_queue.sync_q.get_nowait()
+                    if relay_addr_str:
+                        await self._send_system_message(f"[Relay] Processing dynamic relay connection: {relay_addr_str}")
+                        
+                        if not self.circuit_v2:
+                            await self._send_system_message("[Relay] Relay not initialized (use --relay at startup)")
+                            continue
+                        
+                        try:
+                            # Parse the relay address
+                            addr = multiaddr.Multiaddr(relay_addr_str)
+                            info = info_from_p2p_addr(addr)
+                            await self._send_system_message(f"[Relay] Parsed relay peer ID: {info.peer_id}")
+                            
+                            # Check if already connected
+                            if info.peer_id in self.host.get_network().connections:
+                                await self._send_system_message(f"[Relay] Already connected to {info.peer_id}")
+                            else:
+                                await self._send_system_message(f"[Relay] Connecting to relay...")
+                                await self.host.connect(info)
+                                await self._send_system_message(f"[Relay] TCP connection established")
+                            
+                            # Wait for protocol negotiation
+                            await self._send_system_message(f"[Relay] Waiting for protocol negotiation...")
+                            await trio.sleep(3)
+                            
+                            # Attempt reservation
+                            if self.relay_discovery:
+                                # CRITICAL: Add relay to _discovered_relays first!
+                                now = time.time()
+                                self.relay_discovery._discovered_relays[info.peer_id] = RelayInfo(
+                                    peer_id=info.peer_id,
+                                    discovered_at=now,
+                                    last_seen=now,
+                                )
+                                await self._send_system_message(f"[Relay] Added relay to discovered_relays")
+                                
+                                await self._send_system_message(f"[Relay] Making reservation...")
+                                reserved = await self.relay_discovery.make_reservation(info.peer_id)
+                                
+                                if reserved:
+                                    await self._send_system_message(f"[Relay] Reservation GRANTED by {str(info.peer_id)[:12]}")
+                                    
+                                    # Show relay addresses
+                                    relay_addrs = [str(a) for a in self.host.get_addrs() if "p2p-circuit" in str(a)]
+                                    if relay_addrs:
+                                        await self._send_system_message(f"[Relay] Your relay address: {relay_addrs[0]}")
+                                else:
+                                    await self._send_system_message(f"[Relay] Reservation DENIED")
+                            else:
+                                await self._send_system_message(f"[Relay] No RelayDiscovery service available")
+                                
+                        except Exception as e:
+                            await self._send_system_message(f"[Relay] Failed: {type(e).__name__}: {e}")
+                            logger.exception(f"Full traceback for relay connection:")
+                            
+                except Empty:
+                    await trio.sleep(0.1)
+                except Exception as e:
+                    logger.error(f"Error processing relay connection: {e}")
+                    await trio.sleep(0.1)
+                    
+            except Exception as e:
+                logger.error(f"Error in relay connection processing: {e}")
                 await trio.sleep(0.1)
 
     async def _wait_for_stop(self):
@@ -682,15 +1066,32 @@ class HeadlessService:
         """Get connection information for UI."""
         if not self.ready:
             return {}
-        
+
+        all_addrs = self.host.get_addrs()
+        relay_paths = [str(a) for a in all_addrs if "p2p-circuit" in str(a)]
+
+        # Relay server stats: how many reservations we're hosting
+        hosted_reservations = 0
+        hosted_peers = []
+        if self.relay_server_mode and self.circuit_v2 and hasattr(self.circuit_v2, 'resource_manager'):
+            rm = self.circuit_v2.resource_manager
+            if hasattr(rm, '_reservations'):
+                hosted_reservations = len(rm._reservations)
+                hosted_peers = [str(pid)[:12] for pid in rm._reservations.keys()]
+
         return {
             'peer_id': str(self.host.get_id()),
             'nickname': self.nickname,
             'multiaddr': self.full_multiaddr,
+            'relay_addrs': relay_paths,
+            'relay_server_mode': self.relay_server_mode,
+            'hosted_reservations': hosted_reservations,
+            'hosted_peers': hosted_peers,
             'connected_peers': self.chat_room.get_connected_peers() if self.chat_room else set(),
-            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0
+            'peer_count': self.chat_room.get_peer_count() if self.chat_room else 0,
+            'autonat_status': self.autonat.get_status() if self.autonat else 0
         }
-    
+        
     def get_subscribed_topics(self) -> Set[str]:
         """Get list of all subscribed topics."""
         if not self.chat_room:
@@ -746,6 +1147,42 @@ class HeadlessService:
             
         except Exception as e:
             logger.error(f"Failed to queue peer connection: {e}")
+            return False
+    
+    def connect_to_relay(self, relay_addr: str) -> bool:
+        """
+        Connect to a relay server dynamically (thread-safe wrapper).
+        Requires --relay flag at startup to initialize relay components.
+        
+        Args:
+            relay_addr: The multiaddress of the relay to connect to
+            
+        Returns:
+            True if relay connection request was queued, False otherwise
+        """
+        if not self.host or not self.running:
+            logger.warning("Cannot connect to relay: host not ready or service not running")
+            return False
+        
+        if not self.circuit_v2:
+            logger.warning("Cannot connect to relay: relay not initialized (use --relay at startup)")
+            return False
+        
+        try:
+            # Add to relay_addrs and trigger connection
+            if relay_addr not in self.relay_addrs:
+                self.relay_addrs.append(relay_addr)
+            
+            # Put relay connection request in a special queue
+            if not hasattr(self, 'relay_connection_queue'):
+                self.relay_connection_queue = janus.Queue()
+            
+            self.relay_connection_queue.sync_q.put(relay_addr)
+            logger.info(f"Queued relay connection request: {relay_addr}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to queue relay connection: {e}")
             return False
     
     def get_message_queue(self):
@@ -846,7 +1283,7 @@ class HeadlessService:
                 # Parse the identify response using official parser
                 identify_info = parse_identify_response(response_bytes)
                 
-                logger.info(f" Received identify info from {peer_id}")
+                logger.info(f"Received identify info from {peer_id}")
                 logger.info(f"  - Protocol Version: {identify_info.protocol_version}")
                 logger.info(f"  - Agent Version: {identify_info.agent_version}")
                 logger.info(f"  - Public Key: {len(identify_info.public_key)} bytes")
