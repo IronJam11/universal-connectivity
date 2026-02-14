@@ -151,7 +151,9 @@ class ChatUI(App[None]):
         self.message_input = self.query_one("#message-input", Input)
         
         # Set titles
-        self.chat_log.border_title = "Room: universal-connectivity"
+        topics = self.headless_service.get_subscribed_topics()
+        room_name = next(iter(sorted(topics)), "chat") if topics else "chat"
+        self.chat_log.border_title = f"Room: {room_name}"
         self.peers_log.border_title = "Peers"
         self.system_log.border_title = "System"
         
@@ -209,11 +211,59 @@ class ChatUI(App[None]):
         
         elif cmd == "/status":
             info = self.headless_service.get_connection_info()
-            self.display_system_message(f"Status:")
-            self.display_system_message(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
-            self.display_system_message(f"  - Nickname: {info.get('nickname', 'Unknown')}")
-            self.display_system_message(f"  - Connected peers: {info.get('peer_count', 0)}")
-            self.display_system_message(f"  - Subscribed topics: chat, discovery")
+            self.display_system_message("--- Status ---")
+            self.display_system_message(f"  Nickname: {info.get('nickname', 'Unknown')}")
+            self.display_system_message(f"  Peer ID: {info.get('peer_id', 'Unknown')}")
+            self.display_system_message(f"  Multiaddr: {info.get('multiaddr', 'Unknown')}")
+            self.display_system_message(f"  AutoNAT status: {info.get('autonat_status', 'N/A')}")
+
+            # Peer counts
+            swarm_peers = info.get('swarm_peers', [])
+            pubsub_peers = info.get('pubsub_peers', [])
+            dht_peers = info.get('dht_peers', [])
+            self.display_system_message(f"  Swarm connections: {len(swarm_peers)}")
+            self.display_system_message(f"  PubSub peers: {len(pubsub_peers)}")
+            self.display_system_message(f"  DHT routing table: {len(dht_peers)}")
+
+            # Swarm peer list
+            if swarm_peers:
+                self.display_system_message("  Swarm connected peers:")
+                for pid in swarm_peers:
+                    label = " [pubsub]" if pid in pubsub_peers else ""
+                    self.display_system_message(f"    - {pid[:16]}...{label}")
+
+            # Subscribed topics
+            topics = info.get('subscribed_topics', [])
+            self.display_system_message(f"  Subscribed topics: {', '.join(sorted(topics)) if topics else 'none'}")
+
+            # Relay information
+            self.display_system_message(f"  Relay server mode: {info.get('relay_server_mode', False)}")
+            relay_addrs = info.get('relay_addrs', [])
+            if relay_addrs:
+                self.display_system_message(f"  Relay circuit addresses ({len(relay_addrs)}):")
+                for ra in relay_addrs:
+                    self.display_system_message(f"    - {ra}")
+
+            # Hosted reservations (relay server accepted peers)
+            hosted = info.get('hosted_peers', [])
+            if hosted:
+                self.display_system_message(f"  Hosted reservations ({len(hosted)}):")
+                for hp in hosted:
+                    pid = hp.get('peer_id', 'unknown')
+                    bx = hp.get('bytes_transferred', 0)
+                    ac = hp.get('active_conns', 0)
+                    self.display_system_message(f"    - {pid[:16]}...  bytes={bx}  active_conns={ac}")
+            else:
+                self.display_system_message("  Hosted reservations: 0")
+
+            # Active relay circuits
+            circuits = info.get('active_circuits', {})
+            if circuits:
+                self.display_system_message(f"  Active relay circuits ({len(circuits)}):")
+                for pid, ctype in circuits.items():
+                    self.display_system_message(f"    - {pid[:16]}...  type={ctype}")
+
+            self.display_system_message("--- End Status ---")
         
         elif cmd == "/multiaddr":
             info = self.headless_service.get_connection_info()

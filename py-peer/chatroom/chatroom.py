@@ -195,7 +195,7 @@ class ChatRoom:
                 # For now, we just log that we got the public key
                 return True
             else:
-                logger.warning(f"⚠️  Could not get public key for {sender_id} via identify protocol")
+                logger.warning(f"Could not get public key for {sender_id} via identify protocol")
                 return True  # Still accept message but log the issue
                 
         except Exception as e:

@@ -190,7 +190,7 @@ async def monitor_message_queues(headless_service):
                 logger.info(f"Received system message from queue: {system_data}")
                 
                 if system_data.get('type') == 'system_message':
-                    logger.info(f"📡 {system_data['message']}")
+                    logger.info(f"[system] {system_data['message']}")
                     
             except:
                 pass  # Empty queue is normal, no need to log
@@ -217,27 +217,75 @@ async def handle_user_input(headless_service):
                 info = headless_service.get_connection_info()
                 peers = info.get('connected_peers', set())
                 if peers:
-                    logger.info(f"📡 Connected peers ({len(peers)}):")
+                    logger.info(f"Connected peers ({len(peers)}):")
                     for peer in peers:
                         logger.info(f"  - {peer[:8]}...")
                 else:
-                    logger.info("📡 No peers connected")
+                    logger.info("No peers connected")
                 continue
             
             elif message.strip() == "/multiaddr":
                 info = headless_service.get_connection_info()
-                logger.info(f"\n📋 Copy this multiaddress:")
+                logger.info(f"\nCopy this multiaddress:")
                 logger.info(f"{info.get('multiaddr', 'Unknown')}")
                 logger.info(f"")
                 continue
             
             elif message.strip() == "/status":
                 info = headless_service.get_connection_info()
-                logger.info(f" Status:")
-                logger.info(f"  - Multiaddr: {info.get('multiaddr', 'Unknown')}")
-                logger.info(f"  - Nickname: {info.get('nickname', 'Unknown')}")
-                logger.info(f"  - Connected peers: {info.get('peer_count', 0)}")
-                logger.info(f"  - Subscribed topics: chat, discovery")
+                logger.info("--- Status ---")
+                logger.info(f"  Nickname: {info.get('nickname', 'Unknown')}")
+                logger.info(f"  Peer ID: {info.get('peer_id', 'Unknown')}")
+                logger.info(f"  Multiaddr: {info.get('multiaddr', 'Unknown')}")
+                logger.info(f"  AutoNAT status: {info.get('autonat_status', 'N/A')}")
+
+                # Peer counts
+                swarm_peers = info.get('swarm_peers', [])
+                pubsub_peers = info.get('pubsub_peers', [])
+                dht_peers = info.get('dht_peers', [])
+                logger.info(f"  Swarm connections: {len(swarm_peers)}")
+                logger.info(f"  PubSub peers: {len(pubsub_peers)}")
+                logger.info(f"  DHT routing table: {len(dht_peers)}")
+
+                # Swarm peer list
+                if swarm_peers:
+                    logger.info("  Swarm connected peers:")
+                    for pid in swarm_peers:
+                        label = "[pubsub]" if pid in pubsub_peers else ""
+                        logger.info(f"    - {pid[:16]}... {label}")
+
+                # Subscribed topics
+                topics = info.get('subscribed_topics', [])
+                logger.info(f"  Subscribed topics: {', '.join(sorted(topics)) if topics else 'none'}")
+
+                # Relay information
+                logger.info(f"  Relay server mode: {info.get('relay_server_mode', False)}")
+                relay_addrs = info.get('relay_addrs', [])
+                if relay_addrs:
+                    logger.info(f"  Relay circuit addresses ({len(relay_addrs)}):")
+                    for ra in relay_addrs:
+                        logger.info(f"    - {ra}")
+
+                # Hosted reservations (relay server)
+                hosted = info.get('hosted_peers', [])
+                if hosted:
+                    logger.info(f"  Hosted reservations ({len(hosted)}):")
+                    for hp in hosted:
+                        pid = hp.get('peer_id', 'unknown')
+                        bx = hp.get('bytes_transferred', 0)
+                        ac = hp.get('active_conns', 0)
+                        logger.info(f"    - {pid[:16]}...  bytes={bx}  active_conns={ac}")
+                else:
+                    logger.info("  Hosted reservations: 0")
+
+                # Active relay circuits
+                circuits = info.get('active_circuits', {})
+                if circuits:
+                    logger.info(f"  Active relay circuits ({len(circuits)}):")
+                    for pid, ctype in circuits.items():
+                        logger.info(f"    - {pid[:16]}...  type={ctype}")
+
+                logger.info("--- End Status ---")
                 continue
             
             if message.strip():
@@ -356,8 +404,6 @@ def main():
         ),
     )
 
-
-    
     args = parser.parse_args()
     
     # Default logging setup (will be reconfigured based on mode)
