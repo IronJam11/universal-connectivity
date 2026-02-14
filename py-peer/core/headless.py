@@ -40,6 +40,18 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.host.autonat.autonat import AutoNATService 
+from libp2p.relay.circuit_v2.protocol import (
+    CircuitV2Protocol,
+    PROTOCOL_ID as RELAY_PROTOCOL_ID,
+    STOP_PROTOCOL_ID as RELAY_STOP_PROTOCOL_ID,
+)
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
+from libp2p.relay.circuit_v2.resources import RelayLimits
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery, RelayInfo 
+from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+
 from chatroom.chatroom import ChatRoom, ChatMessage
 
 logger = logging.getLogger("headless")
@@ -124,7 +136,7 @@ class HeadlessService:
     Headless service managing libp2p components and UI communication via queues.
     """
 
-    def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None):
+    def __init__(self, nickname: str, port: int = 0, connect_addrs: List[str] = None, ui_mode: bool = False, strict_signing: bool = True, seed: int = None, topic: str = None, relay_addrs: List[str] = None, relay_server_mode: bool = True, enable_autonat: bool = True, enable_dcutr: bool = True):
         self.nickname = nickname
         self.port = port if port != 0 else find_free_port()
         self.connect_addrs = connect_addrs or []
@@ -140,6 +152,14 @@ class HeadlessService:
         self.dht = None
         self.chat_room = None
         
+        # NAT Traversal 
+        self.autonat: AutoNATService = None          # AutoNATService instance
+        self.circuit_v2: CircuitV2Protocol = None    # CircuitV2Protocol instance
+        self.relay_config: RelayConfig = None        # RelayConfig instance
+        self.circuit_v2_transport: CircuitV2Transport = None  # CircuitV2Transport instance
+        self.relay_discovery:RelayDiscovery = None   # RelayDiscovery instance
+        self.dcutr: DCUtRProtocol = None   
+
         # Service state
         self.running = False
         self.ready = False

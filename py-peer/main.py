@@ -92,7 +92,11 @@ async def main_async(args):
         connect_addrs=args.connect,
         strict_signing=strict_signing,
         seed=args.seed,
-        topic=args.topic
+        topic=args.topic,
+        relay_addrs=args.relay,
+        relay_server_mode=args.relay_server,
+        enable_autonat=not args.no_autonat,
+        enable_dcutr=not args.no_dcutr
     )
     
     try:
@@ -312,6 +316,47 @@ def main():
         type=str,
         help="Custom topic to subscribe.",
     )
+
+    # nat-traversal args
+
+    parser.add_argument(
+        "--relay",
+        action="append",
+        default=[],
+        help="Use relay address (can be used multiple times, e.g. --relay /ip4/"
+    )
+
+    parser.add_argument(
+        "--relay-server",
+        action="store_true",
+        help="Run in relay server mode (enables relay functionality for other peers)",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--no-autonat",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable AutoNAT. By default AutoNATService is created, which "
+            "asks connected peers to dial us back to determine reachability. "
+            "Source: libp2p/host/autonat/autonat.py → AutoNATService."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-dcutr",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable DCUtR hole punching. By default DCUtRProtocol is created "
+            "when --relay is set. It upgrades relayed connections to direct ones "
+            "using simultaneous-open. "
+            "Source: libp2p/relay/circuit_v2/dcutr.py → DCUtRProtocol."
+        ),
+    )
+
+
     
     args = parser.parse_args()
     
@@ -344,7 +389,11 @@ def main():
                 connect_addrs=args.connect,
                 strict_signing=strict_signing,
                 seed=args.seed,
-                topic=args.topic
+                topic=args.topic,
+                relay_addrs=args.relay,
+                relay_server_mode=args.relay_server,
+                enable_autonat=not args.no_autonat,
+                enable_dcutr=not args.no_dcutr
             )
             
             # Start headless service in background thread
@@ -356,7 +405,7 @@ def main():
             
             # Import kivy_ui here to avoid issues if kivy is not installed
             try:
-                from kivy_ui import run_kivy_ui
+                from ui.kivy_ui import run_kivy_ui
             except ImportError as e:
                 logger.error("Failed to import kivy_ui. Make sure Kivy and KivyMD are installed.")
                 logger.error(f"Error: {e}")
@@ -384,7 +433,11 @@ def main():
                 connect_addrs=args.connect,
                 strict_signing=strict_signing,
                 seed=args.seed,
-                topic=args.topic
+                topic=args.topic,
+                relay_addrs=args.relay,
+                relay_server_mode=args.relay_server,
+                enable_autonat=not args.no_autonat,
+                enable_dcutr=not args.no_dcutr
             )
             
             # Start headless service in background thread
